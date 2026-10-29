@@ -50,6 +50,13 @@ choosing between `continue` (forward the mutated request downstream) and
    bidi; controller↔extproc uses plain gRPC bidi internally. See
    [Controller design (refined)](#controller-design-refined).
 
+8. **Privacy: session binding by hashed source IP.** Tie a session id to a source
+   IP via hash (e.g. SHA-256 of the IP string) so no PII is stored. Requires an
+   LB that sets `X-Forwarded-For` (e.g. ALB) since envoy sits behind the LB. The
+   binding lets the controller validate that updates correspond to the session's
+   bound source IP and reject mismatches. (The exact rejection semantics for
+   "cross origin"/mismatched updates are still to be nailed down.)
+
 ## Proposed architecture
 
 ```
