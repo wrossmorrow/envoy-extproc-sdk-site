@@ -20,15 +20,15 @@ choosing between `continue` (forward the mutated request downstream) and
 2. **Timeouts: configurable, higher.** The Envoy ext_proc example config ships
    with a very short `message_timeout`; interactive human-in-the-loop processing
    needs a much larger, configurable value (their own test setup raised it to 60s
-   for delayed phases). The phase processors should also know the timeout and be
-   able to issue an immediate response rather than waiting for the transport
-   timeout to fire.
+   for delayed phases). Refined: the phase timeout is configurable (proposal:
+   default 30s), applied per-phase; the processor arms a phase deadline itself
+   when entering a phase and, on expiry, issues an immediate response rather than
+   waiting for the transport timeout to fire. Envoy `message_timeout` should be
+   set to accommodate the phase timeout.
 
-3. **Phase scope: request phases first.** Start with the request phase set
-   (`REQUEST_HEADERS`, `REQUEST_BODY`, …), possibly starting with just request
-   header interception to keep scope controlled; body-phase mutation is a
-   natural follow-on. Response phases may come later if the demo proves
-   compelling.
+3. **Phase scope: request headers first (v1).** Start with request-header
+   interception only. Body-phase handling and mutation are follow-ons. Response
+   phases may come later if the demo proves compelling.
 
 4. **Session model: controller-owned.** The website asks a controller service
    for a session id first; the browser's Envoy-bound HTTP requests then carry
@@ -96,6 +96,12 @@ browser (static site, CloudFront) ──TLS──▶ ALB/CloudFront ──▶ En
   completion; controller marks the session complete and ends the `GetUpdates`
   stream. Timeout: processor-side deadline on the wait → immediate response
   (proposal: status `504`).
+- **Create/GetUpdates flow:** `CreateSession` returns a session id; the browser
+  then opens `GetUpdates(session_id)` (server-streaming) and holds it while the
+  envoy-bound request (carrying the session id) is in flight. Feasible and
+  coherent. Keeping the two-RPC shape (Create → id, then GetUpdates) is the
+  preferred design; folding the stream into `CreateSession` would mean client
+  streaming and is not preferred.
 
 ## Open questions
 
