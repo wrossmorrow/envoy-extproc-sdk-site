@@ -23,6 +23,12 @@ service DemoProcessor {
   // Process carries the extproc<->controller channel as a bidi stream: the
   // extproc initiates on request receipt and sends phase updates, the
   // controller sends decisions back.
+}
+
+// DemoProcessor is the internal controller<->extproc channel service. It is
+// not part of the human-facing surface; it exists for the demo's extproc to
+// exchange phase updates and decisions with the controller.
+service DemoProcessor {
   rpc Process (stream Update) returns (stream UpdateRequest);
 }
 
