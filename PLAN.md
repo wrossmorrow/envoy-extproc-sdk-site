@@ -45,6 +45,11 @@ choosing between `continue` (forward the mutated request downstream) and
    internally and never supports public HTTP; TLS terminates at the load
    balancer. Docker compose on EC2.
 
+7. **Controller design (refined):** browser-facing uses server-streaming
+   `GetUpdates` + paired decision RPCs, no browser bidi; controller↔extproc uses
+   plain gRPC bidi internally. See
+   [Controller design (refined)](#controller-design-refined).
+
 ## Proposed architecture
 
 ```
@@ -70,6 +75,25 @@ browser (static site, CloudFront) ──TLS──▶ ALB/CloudFront ──▶ En
   `CreateSession`, e.g. a streaming RPC). Phase feedback flows processor →
   controller → browser. Decisions flow browser → controller → processor. Open
   question on the exact RPC shape.
+
+## Controller design (refined)
+
+- **Browser ↔ controller:** no bidi. Browser-facing channel uses server-streaming
+  (`GetUpdates`) plus paired decision RPCs (`UpdateRequest`, `CancelRequest`).
+  Connect supports bidi, but the protocol requires HTTP/2 for bidi while its
+  browser-friendly core is HTTP/1.1; server-streaming/client-streaming/unary all
+  work over HTTP/1.1. So: Connect server-streaming for phase updates, decisions
+  submitted as paired update/cancel requests. (SSE is the fallback transport for
+  server→client streaming; Connect server-streaming is the modern equivalent and
+  fits the HTTP/1.1 story.)
+- **Controller ↔ extproc:** plain gRPC bidi (Go server ↔ Go client, h2c on the
+  compose network) is acceptable and desirable. Phase reports and decisions ride
+  the bidi stream; the extproc blocks on the stream while holding the Envoy
+  phase; the controller streams phase updates to the browser via `GetUpdates` and
+  delivers decisions back through the stream. Extproc closes the stream on
+  completion; controller marks the session complete and ends the `GetUpdates`
+  stream. Timeout: processor-side deadline on the wait → immediate response
+  (proposal: status `504`).
 
 ## Open questions
 
