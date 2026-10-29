@@ -14,6 +14,11 @@ service DemoController {
 
   // UpdateRequest submits a human decision (continue/cancel) for a session at a phase.
   rpc SubmitDecision (UpdateRequest) returns (UpdateResponse);
+
+  // Process carries the extproc<->controller channel as a bidi stream: the
+  // extproc initiates on request receipt and sends phase updates, the
+  // controller sends decisions back.
+  rpc Process (stream Update) returns (stream Update);
 }
 
 message CreateSessionRequest {}

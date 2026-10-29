@@ -4,6 +4,7 @@ import (
 	"context"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
 	grpc "google.golang.org/grpc"
+	"io"
 )
 
 // DemoControllerGRPCServer implements the DemoController gRPC service so
@@ -42,4 +43,26 @@ func (s *DemoControllerGRPCServer) SubmitDecision(ctx context.Context, req *v1.U
 		return nil, err
 	}
 	return &v1.UpdateResponse{}, nil
+}
+
+// Process carries the extproc<->controller channel as a bidi stream: the extproc
+// initiates on request receipt and sends phase updates, the controller sends
+// decisions back.
+func (s *DemoControllerGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Update, v1.Update]) error {
+	for {
+		update, err := stream.Recv()
+		if err != io.EOF {
+			if err != nil {
+				return err
+			}
+			break
+		}
+		// update: phase update from extproc (client) to controller (server); the
+		// controller moves it to the user/browser.
+		// Controller sends decision back to extproc.
+		if err := stream.Send(&v1.Update{SessionId: update.SessionId, Phase: update.Phase}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

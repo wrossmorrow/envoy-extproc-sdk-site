@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -158,6 +159,25 @@ func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect
 		return nil, err
 	}
 	return &connect.Response[v1.UpdateResponse]{}, nil
+}
+
+// Process carries the extproc<->controller channel as a bidi stream: the extproc
+// initiates on request receipt and sends phase updates, the controller sends
+// decisions back.
+func (h *DemoControllerHandler) Process(ctx context.Context, stream *connect.BidiStream[v1.Update, v1.Update]) error {
+	for {
+		update, err := stream.Receive()
+		if err != io.EOF {
+			if err != nil {
+				return err
+			}
+			break
+		}
+		if err := stream.Send(&v1.Update{SessionId: update.SessionId, Phase: update.Phase}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // newSessionID returns a new session id.
