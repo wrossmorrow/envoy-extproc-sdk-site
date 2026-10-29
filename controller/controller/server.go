@@ -131,17 +131,16 @@ func NewDemoControllerHandler(controller *SessionController) (string, http.Handl
 	return v1connect.NewDemoControllerHandler(&DemoControllerHandler{Controller: controller})
 }
 
-func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error) {
+// CreateSession creates a new session and opens a stream of updates. The
+// first Update carries the session id with phase NOT_STARTED; the browser then
+// sends the envoy-bound request carrying that session id and receives phase
+// updates as the session resolves.
+func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest], stream *connect.ServerStream[v1.Update]) error {
 	s, err := h.Controller.CreateSession()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &connect.Response[v1.CreateSessionResponse]{Msg: &v1.CreateSessionResponse{SessionId: s.ID}}, nil
-}
-
-func (h *DemoControllerHandler) GetUpdates(ctx context.Context, req *connect.Request[v1.GetUpdatesRequest], stream *connect.ServerStream[v1.Update]) error {
-	s, err := h.Controller.GetSession(req.Msg.GetSessionId())
-	if err != nil {
+	if err := stream.Send(&v1.Update{SessionId: s.ID, Phase: v1.Phase_NOT_STARTED}); err != nil {
 		return err
 	}
 	return h.Controller.GetUpdates(s.ID, func(u *v1.Update) error {
@@ -149,8 +148,13 @@ func (h *DemoControllerHandler) GetUpdates(ctx context.Context, req *connect.Req
 	})
 }
 
+// UpdateRequest submits a human decision (continue/cancel) for a session at a phase.
 func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect.Request[v1.UpdateRequest]) (*connect.Response[v1.UpdateResponse], error) {
-	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), req.Msg.GetPhase(), "continue"); err != nil {
+	action := "continue"
+	if req.Msg.GetDecision().GetCancel() != nil {
+		action = "cancel"
+	}
+	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), action); err != nil {
 		return nil, err
 	}
 	return &connect.Response[v1.UpdateResponse]{}, nil
