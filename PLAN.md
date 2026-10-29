@@ -46,8 +46,8 @@ choosing between `continue` (forward the mutated request downstream) and
    balancer. Docker compose on EC2.
 
 7. **Controller design (refined):** browser-facing uses server-streaming
-   `GetUpdates` + paired decision RPCs, no browser bidi; controller↔extproc uses
-   plain gRPC bidi internally. See
+   `GetUpdates` + unified `UpdateRequest` decision RPC (action oneof), no browser
+   bidi; controller↔extproc uses plain gRPC bidi internally. See
    [Controller design (refined)](#controller-design-refined).
 
 ## Proposed architecture
@@ -70,20 +70,22 @@ browser (static site, CloudFront) ──TLS──▶ ALB/CloudFront ──▶ En
   waiting on the human decision; then `ContinueRequest()` / `CancelRequest(...)`.
   Fail-closed. On phase timeout, issue immediate response (proposal: status `504`;
   open).
-- **Controller**: owns sessions. RPCs under discussion: `CreateSession`,
-  `GetSession`, and a decision-submission mechanism (possibly aligned with
-  `CreateSession`, e.g. a streaming RPC). Phase feedback flows processor →
-  controller → browser. Decisions flow browser → controller → processor. Open
-  question on the exact RPC shape.
+- **Controller**: owns sessions. RPCs: `CreateSession`, `GetSession`,
+  `GetUpdates` (server-streaming), and unified decision RPC `UpdateRequest`
+  (action: `CONTINUE` or `CANCEL` via oneof; cancel carries status/headers/body).
+  Phase feedback flows processor → controller → browser. Decisions flow browser →
+  controller → processor. (Unified decision shape now settled; full RPC surface
+  still open.)
 
 ## Controller design (refined)
 
 - **Browser ↔ controller:** no bidi. Browser-facing channel uses server-streaming
-  (`GetUpdates`) plus paired decision RPCs (`UpdateRequest`, `CancelRequest`).
+  (`GetUpdates`) plus a single decision RPC, `UpdateRequest`, carrying an action
+  (`CONTINUE` / `CANCEL`) via a oneof (cancel carries status/headers/body).
   Connect supports bidi, but the protocol requires HTTP/2 for bidi while its
   browser-friendly core is HTTP/1.1; server-streaming/client-streaming/unary all
   work over HTTP/1.1. So: Connect server-streaming for phase updates, decisions
-  submitted as paired update/cancel requests. (SSE is the fallback transport for
+  submitted as the unified `UpdateRequest`. (SSE is the fallback transport for
   server→client streaming; Connect server-streaming is the modern equivalent and
   fits the HTTP/1.1 story.)
 - **Controller ↔ extproc:** plain gRPC bidi (Go server ↔ Go client, h2c on the
