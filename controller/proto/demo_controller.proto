@@ -18,7 +18,7 @@ service DemoController {
   // Process carries the extproc<->controller channel as a bidi stream: the
   // extproc initiates on request receipt and sends phase updates, the
   // controller sends decisions back.
-  rpc Process (stream Update) returns (stream Update);
+  rpc Process (stream Update) returns (stream UpdateRequest);
 }
 
 message CreateSessionRequest {}

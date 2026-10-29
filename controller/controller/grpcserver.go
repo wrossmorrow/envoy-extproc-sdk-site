@@ -48,7 +48,7 @@ func (s *DemoControllerGRPCServer) SubmitDecision(ctx context.Context, req *v1.U
 // Process carries the extproc<->controller channel as a bidi stream: the extproc
 // initiates on request receipt and sends phase updates, the controller sends
 // decisions back.
-func (s *DemoControllerGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Update, v1.Update]) error {
+func (s *DemoControllerGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Update, v1.UpdateRequest]) error {
 	for {
 		update, err := stream.Recv()
 		if err != io.EOF {
@@ -57,10 +57,13 @@ func (s *DemoControllerGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Up
 			}
 			break
 		}
-		// update: phase update from extproc (client) to controller (server); the
-		// controller moves it to the user/browser.
-		// Controller sends decision back to extproc.
-		if err := stream.Send(&v1.Update{SessionId: update.SessionId, Phase: update.Phase}); err != nil {
+
+		decision := &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}
+		if err := stream.Send(&v1.UpdateRequest{
+			SessionId: update.SessionId,
+			Phase:     update.Phase,
+			Decision:  decision,
+		}); err != nil {
 			return err
 		}
 	}

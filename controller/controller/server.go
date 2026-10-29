@@ -164,7 +164,7 @@ func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect
 // Process carries the extproc<->controller channel as a bidi stream: the extproc
 // initiates on request receipt and sends phase updates, the controller sends
 // decisions back.
-func (h *DemoControllerHandler) Process(ctx context.Context, stream *connect.BidiStream[v1.Update, v1.Update]) error {
+func (h *DemoControllerHandler) Process(ctx context.Context, stream *connect.BidiStream[v1.Update, v1.UpdateRequest]) error {
 	for {
 		update, err := stream.Receive()
 		if err != io.EOF {
@@ -173,7 +173,13 @@ func (h *DemoControllerHandler) Process(ctx context.Context, stream *connect.Bid
 			}
 			break
 		}
-		if err := stream.Send(&v1.Update{SessionId: update.SessionId, Phase: update.Phase}); err != nil {
+
+		decision := &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}
+		if err := stream.Send(&v1.UpdateRequest{
+			SessionId: update.SessionId,
+			Phase:     update.Phase,
+			Decision:  decision,
+		}); err != nil {
 			return err
 		}
 	}
