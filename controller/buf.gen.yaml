@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+  - remote: buf.build/protocolbuffers/go:v1.28.1
+    out: gen
