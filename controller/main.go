@@ -30,9 +30,11 @@ func main() {
 	mux.Handle(path, h)
 	srv := &http.Server{Addr: listenAddr, Handler: mux}
 
-	// gRPC server for the demo processor to exchange phase updates and decisions.
+	// gRPC server hosting the demo controller (human-facing) and demo processor
+	// (internal channel) services.
 	gRPCServer := grpc.NewServer()
 	v1.RegisterDemoControllerServer(gRPCServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoProcessorServer(gRPCServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
 	gRPCListener, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		slog.Error("controller gRPC server error", "error", err.Error())

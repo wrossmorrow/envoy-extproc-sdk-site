@@ -7,9 +7,8 @@ import (
 	"io"
 )
 
-// DemoControllerGRPCServer implements the DemoController gRPC service so
-// that the demo processor can exchange phase updates and decisions with the
-// controller over gRPC.
+// DemoControllerGRPCServer implements the DemoController gRPC service. It
+// carries the human-facing session flow (CreateSession / SubmitDecision).
 type DemoControllerGRPCServer struct {
 	Controller *SessionController
 
@@ -45,10 +44,20 @@ func (s *DemoControllerGRPCServer) SubmitDecision(ctx context.Context, req *v1.U
 	return &v1.UpdateResponse{}, nil
 }
 
+// DemoProcessorGRPCServer implements the DemoProcessor gRPC service. It is
+// the internal controller<->extproc channel: the extproc initiates on request
+// receipt and sends phase updates, the controller sends decisions back.
+type DemoProcessorGRPCServer struct {
+	Controller *SessionController
+
+	// embed for forward-compatible interface satisfaction
+	v1.UnimplementedDemoProcessorServer
+}
+
 // Process carries the extproc<->controller channel as a bidi stream: the extproc
 // initiates on request receipt and sends phase updates, the controller sends
 // decisions back.
-func (s *DemoControllerGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Update, v1.UpdateRequest]) error {
+func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Update, v1.UpdateRequest]) error {
 	for {
 		update, err := stream.Recv()
 		if err != io.EOF {
