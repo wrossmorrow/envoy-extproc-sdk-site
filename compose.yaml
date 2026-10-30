@@ -12,6 +12,8 @@ services:
     depends_on:
       - echo
       - demo
+    networks:
+      - demo
 
   # upstream "echo" server
   echo:
@@ -21,6 +23,8 @@ services:
       - -name=demo
     ports:
       - "8000:8000"
+    networks:
+      - demo
 
   # controller service
   controller:
@@ -37,6 +41,8 @@ services:
       timeout: 2s
       retries: 15
       start_period: 3s
+    networks:
+      - demo
 
   # demo extproc (minimal M1: request headers phase interception)
   demo:
@@ -44,9 +50,18 @@ services:
     build:
       context: demo
       dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+      - "9090:9090"
     healthcheck:
       test: ["CMD", "/grpc-health-probe", "-addr=localhost:50051"]
       interval: 2s
       timeout: 2s
       retries: 15
       start_period: 3s
+    networks:
+      - demo
+
+networks:
+  demo:
+    internal: true

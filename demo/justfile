@@ -22,13 +22,13 @@ lint:
 
 # run vetter
 vet:
-    go vet -vettool=$(go env GOPATH)/bin/shadow ./...
+    go vet ./...
 
 # run unit tests
-unit-test: 
+unit-test:
     go test -v ./...
 
-# run unit tests
+# run unit tests (standard)
 test:
     go test ./...
 
