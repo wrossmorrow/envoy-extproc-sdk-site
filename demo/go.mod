@@ -1,12 +1,11 @@
-module github.com/wrossmorrow/envoy-extproc-sdk-demo
+module github.com/wrossmorrow/envoy-exproc-sdk-demo
 
 go 1.26.0
 
 require (
 	github.com/envoyproxy/go-control-plane/envoy v1.39.1-0.20260819172001-e6e3fd93e4be
-	github.com/wrossmorrow/envoy-extproc-sdk-controller v0.0.0-00010101000000-000000000000
-	github.com/wrossmorrow/envoy-extproc-sdk-controller/demo v0.0.0-00010101000000-000000000000
-	github.com/wrossmorrow/envoy-extproc-sdk-go v0.2.1
+	github.com/wrossmorrow/envoy-exproc-sdk-controller v0.0.0-00010101000000-000000000000
+	github.com/wrossmorrow/envoy-exproc-sdk-go v0.2.1
 	google.golang.org/grpc v1.85.0
 )
 
@@ -31,6 +30,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/wrossmorrow/envoy-extproc-sdk-controller => ../controller
-
-replace github.com/wrossmorrow/envoy-extproc-sdk-controller/demo => ../controller/demo
+replace github.com/wrossmorrow/envoy-exproc-sdk-controller => ../controller
+replace github.com/wrossmorrow/envoy-exproc-sdk-go => /tmp/extproc-sdk-go

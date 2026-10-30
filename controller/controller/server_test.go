@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
+	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
 )
 
 func TestSessionController_CreateSession(t *testing.T) {
@@ -31,7 +31,7 @@ func TestSessionController_SubmitDecision_RejectsWhenNotInFlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v, want nil", err)
 	}
-	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_REQUEST_HEADERS), "continue"); err == nil {
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "continue"); err == nil {
 		t.Fatalf("SubmitDecision() error = nil, want %v", errSessionNotInFlight)
 	}
 }
@@ -43,8 +43,8 @@ func TestSessionController_SubmitDecision_RejectsPhaseMismatch(t *testing.T) {
 		t.Fatalf("CreateSession() error = %v, want nil", err)
 	}
 	s.Status = SessionStatusInFlight
-	s.Phase = int32(v1.Phase_REQUEST_HEADERS)
-	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_RESPONSE_BODY), "continue"); err == nil {
+	s.Phase = int32(v1.Phase_PHASE_REQUEST_HEADERS)
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_RESPONSE_BODY), "continue"); err == nil {
 		t.Fatalf("SubmitDecision() error = nil, want %v", errPhaseMismatch)
 	}
 }
@@ -56,9 +56,9 @@ func TestSessionController_SubmitDecision_ResolvesPending(t *testing.T) {
 		t.Fatalf("CreateSession() error = %v, want nil", err)
 	}
 	s.Status = SessionStatusInFlight
-	s.Phase = int32(v1.Phase_REQUEST_HEADERS)
-	s.Pending = &pendingDecision{Phase: int32(v1.Phase_REQUEST_HEADERS), Ch: make(chan *pendingResolution, 1)}
-	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_REQUEST_HEADERS), "continue"); err != nil {
+	s.Phase = int32(v1.Phase_PHASE_REQUEST_HEADERS)
+	s.Pending = &pendingDecision{Phase: int32(v1.Phase_PHASE_REQUEST_HEADERS), Ch: make(chan *pendingResolution, 1)}
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "continue"); err != nil {
 		t.Fatalf("SubmitDecision() error = %v, want nil", err)
 	}
 	if s.Status != SessionStatusResolved {

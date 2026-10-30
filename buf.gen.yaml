@@ -3,14 +3,14 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/wrossmorrow/envoy-extproc-sdk-controller/gen/go
+      value: github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go
 plugins:
   - local: protoc-gen-go
-    out: gen/go
+    out: controller/gen/go
     opt: paths=source_relative
   - local: protoc-gen-go-grpc
-    out: gen/go
+    out: controller/gen/go
     opt: paths=source_relative
   - local: protoc-gen-connect-go
-    out: gen/go
+    out: controller/gen/go
     opt: paths=source_relative

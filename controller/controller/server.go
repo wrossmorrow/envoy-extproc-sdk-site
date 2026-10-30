@@ -7,8 +7,8 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
-	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
-	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1/v1connect"
+	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
+	v1connect "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1/controllerv1connect"
 )
 
 // SessionStatus reflects the lifecycle state of a demo session.
@@ -23,7 +23,7 @@ const (
 )
 
 // Update is a single phase-update event sent to the browser for a session.
-type Update = v1.Update
+type Update = v1.CreateSessionResponse
 
 // Session is a single interactive extproc demo session.
 type Session struct {
@@ -81,7 +81,7 @@ func (c *SessionController) GetSession(id string) (*Session, error) {
 	return s, nil
 }
 
-func (c *SessionController) GetUpdates(id string, send func(*v1.Update) error) error {
+func (c *SessionController) GetUpdates(id string, send func(*v1.CreateSessionResponse) error) error {
 	s, err := c.GetSession(id)
 	if err != nil {
 		return err
@@ -128,28 +128,28 @@ type DemoControllerHandler struct {
 
 // NewDemoControllerHandler builds an http.Handler from the demo controller service.
 func NewDemoControllerHandler(controller *SessionController) (string, http.Handler) {
-	return v1connect.NewDemoControllerHandler(&DemoControllerHandler{Controller: controller})
+	return v1connect.NewDemoControllerServiceHandler(&DemoControllerHandler{Controller: controller})
 }
 
 // CreateSession creates a new session and opens a stream of updates. The
 // first Update carries the session id with phase NOT_STARTED; the browser then
 // sends the envoy-bound request carrying that session id and receives phase
 // updates as the session resolves.
-func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest], stream *connect.ServerStream[v1.Update]) error {
+func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest], stream *connect.ServerStream[v1.CreateSessionResponse]) error {
 	s, err := h.Controller.CreateSession()
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&v1.Update{SessionId: s.ID, Phase: v1.Phase_NOT_STARTED}); err != nil {
+	if err := stream.Send(&v1.CreateSessionResponse{SessionId: s.ID, Phase: v1.Phase_PHASE_NOT_STARTED}); err != nil {
 		return err
 	}
-	return h.Controller.GetUpdates(s.ID, func(u *v1.Update) error {
+	return h.Controller.GetUpdates(s.ID, func(u *v1.CreateSessionResponse) error {
 		return stream.Send(u)
 	})
 }
 
-// UpdateRequest submits a human decision (continue/cancel) for a session at a phase.
-func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect.Request[v1.UpdateRequest]) (*connect.Response[v1.UpdateResponse], error) {
+// SubmitDecision submits a human decision for a session at a phase.
+func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error) {
 	action := "continue"
 	if req.Msg.GetDecision().GetCancel() != nil {
 		action = "cancel"
@@ -157,7 +157,7 @@ func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect
 	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), action); err != nil {
 		return nil, err
 	}
-	return &connect.Response[v1.UpdateResponse]{}, nil
+	return &connect.Response[v1.SubmitDecisionResponse]{}, nil
 }
 
 // newSessionID returns a new session id.
