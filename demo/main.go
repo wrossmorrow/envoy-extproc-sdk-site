@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"os"
 
-	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
-	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
+	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
+	extproc "github.com/wrossmorrow/envoy-exproc-sdk-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -18,7 +18,7 @@ const (
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
-// internal DemoProcessor channel over a bidi gRPC stream, sending phase updates
+// internal DemoProcessorService channel over a bidi gRPC stream, sending phase updates
 // and applying the decisions returned by the controller (continue/cancel).
 type demoRequestProcessor struct {
 	opts   *extproc.ProcessingOptions
@@ -26,7 +26,7 @@ type demoRequestProcessor struct {
 
 	conn      *grpc.ClientConn
 	sessionID string
-	stream    grpc.BidiStreamingClient[v1.Update, v1.UpdateRequest]
+	stream    grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]
 
 	controllerAddr string
 }
@@ -53,7 +53,7 @@ func (s *demoRequestProcessor) GetOptions() *extproc.ProcessingOptions {
 }
 
 // controllerStream returns the controller bidi stream, opening one lazily.
-func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiStreamingClient[v1.Update, v1.UpdateRequest], error) {
+func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
 	if s.stream != nil {
 		return s.stream, nil
 	}
@@ -62,7 +62,7 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiS
 		return nil, err
 	}
 	s.conn = conn
-	client := v1.NewDemoProcessorClient(conn)
+	client := v1.NewDemoProcessorServiceClient(conn)
 	st, err := client.Process(ctx)
 	if err != nil {
 		return nil, err
@@ -73,12 +73,12 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiS
 
 // sendPhase sends a phase update to the controller for the session and waits
 // for the controller's decision. Returns the decision (continue/cancel).
-func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessionID string) (*v1.UpdateRequest, error) {
+func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessionID string) (*v1.ProcessResponse, error) {
 	stream, err := s.controllerStream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := stream.Send(&v1.Update{SessionId: sessionID, Phase: v1.Phase(phase)}); err != nil {
+	if err := stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase)}); err != nil {
 		return nil, err
 	}
 	dec, err := stream.Recv()
@@ -99,7 +99,7 @@ func (s *demoRequestProcessor) sessionIDFor(headers extproc.AllHeaders) string {
 }
 
 // sendPhaseAndDecide sends a phase update and returns the controller decision.
-func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, headers extproc.AllHeaders) (*v1.UpdateRequest, error) {
+func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, headers extproc.AllHeaders) (*v1.ProcessResponse, error) {
 	sessionID := s.sessionIDFor(headers)
 	return s.sendPhase(ctx, phase, sessionID)
 }

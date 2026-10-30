@@ -12,6 +12,10 @@ update:
 tidy:
     go mod tidy
 
+# generate protobuf code
+gen:
+    just --working-directory .. gen
+
 # format code
 format:
     go fmt ./...
@@ -22,14 +26,17 @@ lint:
 
 # run vetter
 vet:
+    just --working-directory .. gen
     go vet ./...
 
 # run unit tests
 unit-test:
+    just --working-directory .. gen
     go test -v ./...
 
 # run unit tests (standard)
 test:
+    just --working-directory .. gen
     go test ./...
 
 # run a specific example
@@ -38,6 +45,7 @@ run:
 
 # build binary (variadic flags supported)
 build *flags="":
+    just --working-directory .. gen
     go build {{ flags }} .
 
 containerize tag=image_tag *flags="":

@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package demo.controller.v1;
+
+option go_package = "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1";
+
+// DemoControllerService manages interactive extproc sessions for the demo site.
+service DemoControllerService {
+  // CreateSession creates a new session and opens a stream of updates. The
+  // first Update carries the session id with phase NOT_STARTED; the browser
+  // then sends the envoy-bound request carrying that session id and receives
+  // phase updates as the session resolves.
+  rpc CreateSession(CreateSessionRequest) returns (stream CreateSessionResponse);
+
+  // SubmitDecision submits a human decision (continue/cancel) for a session at a phase.
+  rpc SubmitDecision(SubmitDecisionRequest) returns (SubmitDecisionResponse);
+}
+
+// DemoProcessorService is the internal controller<->extproc channel service. It is
+// not part of the human-facing surface; it exists for the demo's extproc to
+// exchange phase updates and decisions with the controller.
+service DemoProcessorService {
+  // Process carries the extproc<->controller channel as a bidi stream: the
+  // extproc initiates on request receipt and sends phase updates, the controller
+  // sends decisions back.
+  rpc Process(stream ProcessRequest) returns (stream ProcessResponse);
+}
+
+message CreateSessionRequest {}
+
+message CreateSessionResponse {
+  string session_id = 1;
+  Phase phase = 2;
+}
+
+message SubmitDecisionRequest {
+  string session_id = 1;
+  Phase phase = 2;
+  Decision decision = 3;
+}
+
+message SubmitDecisionResponse {}
+
+message ProcessRequest {
+  string session_id = 1;
+  Phase phase = 2;
+}
+
+message ProcessResponse {
+  string session_id = 1;
+  Phase phase = 2;
+  Decision decision = 3;
+}
+
+message Decision {
+  oneof action {
+    Continue continue = 1;
+    Cancel cancel = 2;
+  }
+}
+
+message Continue {
+  // header/body mutations to apply when continuing.
+  map<string, string> headers = 1;
+}
+
+message Cancel {
+  int32 status = 1;
+  string body = 2;
+  map<string, string> headers = 3;
+}
+
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  PHASE_NOT_STARTED = 1;
+  PHASE_REQUEST_HEADERS = 2;
+  PHASE_REQUEST_BODY = 3;
+  PHASE_REQUEST_TRAILERS = 4;
+  PHASE_RESPONSE_HEADERS = 5;
+  PHASE_RESPONSE_BODY = 6;
+  PHASE_RESPONSE_TRAILERS = 7;
+}
