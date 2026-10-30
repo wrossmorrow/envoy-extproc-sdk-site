@@ -38,7 +38,7 @@ run:
 
 # build binary (variadic flags supported)
 build *flags="":
-    go build {{flags}} ./...
+    go build {{ flags }} ./...
 
 containerize tag=image_tag *flags="":
-    docker build -t {{image_name}}:{{tag}} . {{flags}}
+    docker build -t {{ image_name }}:{{ tag }} . {{ flags }}

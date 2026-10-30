@@ -25,7 +25,7 @@ vet:
 unit-test:
     go test -v ./...
 
-# run unit tests
+# run unit tests (standard)
 test:
     go test ./...
 
@@ -35,4 +35,4 @@ gen:
 
 # build binary (variadic flags supported)
 build *flags="":
-    go build {{flags}} ./...
+    go build {{ flags }} ./...
