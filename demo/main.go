@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
 
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
@@ -11,9 +12,9 @@ import (
 )
 
 const (
-	controllerAddr   = "127.0.0.1:9093"
-	sessionIDHeader  = "x-demo-session-id"
-	defaultSessionID = "session"
+	defaultControllerAddr = "127.0.0.1:9093"
+	sessionIDHeader       = "x-demo-session-id"
+	defaultSessionID      = "session"
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -26,13 +27,20 @@ type demoRequestProcessor struct {
 	conn      *grpc.ClientConn
 	sessionID string
 	stream    grpc.BidiStreamingClient[v1.Update, v1.UpdateRequest]
+
+	controllerAddr string
 }
 
 func newDemoRequestProcessor() *demoRequestProcessor {
+	addr := os.Getenv("DEMO_CONTROLLER_ADDR")
+	if addr == "" {
+		addr = defaultControllerAddr
+	}
 	return &demoRequestProcessor{
-		opts:      &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
-		logger:    slog.Default(),
-		sessionID: defaultSessionID,
+		opts:           &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
+		logger:         slog.Default(),
+		sessionID:      defaultSessionID,
+		controllerAddr: addr,
 	}
 }
 
@@ -49,7 +57,7 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiS
 	if s.stream != nil {
 		return s.stream, nil
 	}
-	conn, err := grpc.NewClient(controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(s.controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}

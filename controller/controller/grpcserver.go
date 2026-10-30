@@ -60,8 +60,8 @@ type DemoProcessorGRPCServer struct {
 func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Update, v1.UpdateRequest]) error {
 	for {
 		update, err := stream.Recv()
-		if err != io.EOF {
-			if err != nil {
+		if err != nil {
+			if err != io.EOF {
 				return err
 			}
 			break
