@@ -75,7 +75,7 @@ static_resources:
                 address:
                   socket_address:
                     address: controller
-                    port_value: 50051
+                    port_value: 9093
     type: LOGICAL_DNS
     typed_extension_protocol_options:
       envoy.extensions.upstreams.http.v3.HttpProtocolOptions:

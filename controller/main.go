@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	listenAddr = "127.0.0.1:9092"
-	grpcAddr   = "127.0.0.1:9093"
+	listenAddr = "0.0.0.0:9092"
+	grpcAddr   = "0.0.0.0:9093"
 )
 
 func main() {

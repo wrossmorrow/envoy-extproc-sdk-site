@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultControllerAddr = "127.0.0.1:9093"
+	defaultControllerAddr = "controller:9093"
 	sessionIDHeader       = "x-demo-session-id"
 	defaultSessionID      = "session"
 )

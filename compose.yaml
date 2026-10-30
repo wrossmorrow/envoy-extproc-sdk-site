@@ -33,10 +33,10 @@ services:
       context: controller
       dockerfile: Dockerfile
     ports:
-      - "50051:50051"
-      - "9999:9090"
+      - "9093:9093"
+      - "9092:9092"
     healthcheck:
-      test: ["CMD", "/grpc-health-probe", "-addr=localhost:50051"]
+      test: ["CMD", "/grpc-health-probe", "-addr=localhost:9093"]
       interval: 2s
       timeout: 2s
       retries: 15
