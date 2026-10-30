@@ -4,7 +4,7 @@ FROM golang:${GO_VERSION_TAG} AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
-COPY *.go ./
+COPY . ./
 RUN CGO_ENABLED=0 go build -o /app/controller
 
 RUN go install github.com/grpc-ecosystem/grpc-health-probe@v0.4.39

@@ -36,10 +36,6 @@ test:
 run:
     go run ./...
 
-# codegen, in agent container for version matching; fall back to local buf if docker is unavailable
-gen:
-    docker run --rm -v "$PWD":/work -w /work --entrypoint buf ghcr.io/wrossmorrow/flint-pi-golang generate || buf generate
-
 # build binary (variadic flags supported)
 build *flags="":
     go build {{flags}} .
