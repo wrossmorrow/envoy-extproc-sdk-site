@@ -35,3 +35,5 @@ go.work.sum
 # Build artifacts (binaries named after the Go modules, from `just build`)
 envoy-exproc-sdk-controller
 envoy-exproc-sdk-demo
+
+gen

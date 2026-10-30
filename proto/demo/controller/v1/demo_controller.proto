@@ -10,10 +10,10 @@ service DemoController {
   // first Update carries the session id with phase NOT_STARTED; the browser
   // then sends the envoy-bound request carrying that session id and receives
   // phase updates as the session resolves.
-  rpc CreateSession (CreateSessionRequest) returns (stream Update);
+  rpc CreateSession(CreateSessionRequest) returns (stream Update);
 
   // UpdateRequest submits a human decision (continue/cancel) for a session at a phase.
-  rpc SubmitDecision (UpdateRequest) returns (UpdateResponse);
+  rpc SubmitDecision(UpdateRequest) returns (UpdateResponse);
 }
 
 // DemoProcessor is the internal controller<->extproc channel service. It is
@@ -23,7 +23,7 @@ service DemoProcessor {
   // Process carries the extproc<->controller channel as a bidi stream: the
   // extproc initiates on request receipt and sends phase updates, the
   // controller sends decisions back.
-  rpc Process (stream Update) returns (stream UpdateRequest);
+  rpc Process(stream Update) returns (stream UpdateRequest);
 }
 
 message CreateSessionRequest {}
