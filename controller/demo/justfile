@@ -1,0 +1,38 @@
+default:
+    just --list
+
+# update dependendencies
+update:
+    go get -u && just tidy
+
+# cleanup modules
+tidy:
+    go mod tidy
+
+# format code
+format:
+    go fmt ./...
+
+# run linter
+lint:
+    golangci-lint run ./...
+
+# run vetter
+vet:
+    go vet ./...
+
+# run unit tests
+unit-test:
+    go test -v ./...
+
+# run unit tests (standard)
+test:
+    go test ./...
+
+# codegen, in agent container for version matching; fall back to local buf if docker is unavailable
+gen:
+    docker run --rm -v "$PWD":/work -w /work --entrypoint buf ghcr.io/wrossmorrow/flint-pi-golang generate || buf generate
+
+# build binary (variadic flags supported)
+build *flags="":
+    go build {{ flags }} ./...

@@ -1,0 +1,44 @@
+image_name := "ghcr.io/wrossmorrow/envoy-extproc-sdk-site-cntrl"
+image_tag := `git rev-parse --short HEAD`
+
+default:
+    just --list
+
+# update dependendencies
+update:
+    go get -u && just tidy
+
+# cleanup modules
+tidy:
+    go mod tidy
+
+# format code
+format:
+    go fmt ./...
+
+# run linter
+lint:
+    golangci-lint run ./...
+
+# run vetter
+vet:
+    go vet ./...
+
+# run unit tests
+unit-test:
+    go test -v ./...
+
+# run unit tests (standard)
+test:
+    go test ./...
+
+# run a specific example
+run:
+    go run ./...
+
+# build binary (variadic flags supported)
+build *flags="":
+    go build {{ flags }} .
+
+containerize tag=image_tag *flags="":
+    docker build -t {{ image_name }}:{{ tag }} . {{ flags }}
