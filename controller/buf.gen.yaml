@@ -1,0 +1,8 @@
+version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+  - remote: buf.build/protocolbuffers/go:v1.28.1
+    out: gen
+  - local: protoc-gen-go-grpc
+    out: gen

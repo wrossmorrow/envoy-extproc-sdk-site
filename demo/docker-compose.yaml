@@ -1,0 +1,38 @@
+services:
+
+  # envoy, configured as with envoy.yaml to use the demo extproc
+  envoy:
+    image: envoyproxy/envoy:v1.35-latest
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    ports:
+      - "8080:8000"
+      - "9901:9901"
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    depends_on:
+      - echo
+      - demo
+
+  # upstream "echo" server
+  echo:
+    image: ghcr.io/wrossmorrow/simple-echo-server:main
+    command:
+      - -port=8000
+      - -name=demo
+    ports:
+      - "8000:8000"
+
+  # demo extproc (minimal M1: request headers phase interception)
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "/grpc-health-probe", "-addr=localhost:50051"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
