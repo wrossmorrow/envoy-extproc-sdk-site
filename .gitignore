@@ -22,7 +22,6 @@ profile.cov
 # vendor/
 
 # Go workspace file
-go.work
 go.work.sum
 
 # env file
@@ -33,5 +32,4 @@ go.work.sum
 # .vscode/
 
 # Build artifacts (binaries named after the Go modules, from `just build`)
-envoy-exproc-sdk-controller
-envoy-exproc-sdk-demo
+bin/

@@ -28,10 +28,12 @@ services:
 
   # controller service
   controller:
-    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-cntrl:${CONTROLLER_VERSION:-local}
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-controller:${CONTROLLER_VERSION:-local}
     build:
-      context: controller
+      context: .
       dockerfile: Dockerfile
+      args:
+        CMD: controller
     ports:
       - "9093:9093"
       - "9092:9092"
@@ -48,8 +50,10 @@ services:
   demo:
     image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-demo:${DEMO_VERSION:-local}
     build:
-      context: demo
+      context: .
       dockerfile: Dockerfile
+      args:
+        CMD: demo
     ports:
       - "50051:50051"
       - "9090:9090"
