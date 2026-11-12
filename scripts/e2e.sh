@@ -14,15 +14,24 @@ PHASE="${PHASE:-PHASE_REQUEST_HEADERS}"
 DECISION="${DECISION:-}"
 
 create_session() {
-  curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/CreateSession" \
-    -H 'content-type: application/json' -d '{}'
+  local session_id
+  for _i in $(seq 1 30); do
+    session_id="$(curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/CreateSession" \
+      -H 'content-type: application/json' -d '{}')"
+    session_id="$(printf '%s' "$session_id" | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    if [[ -n "$session_id" ]]; then
+      SESSION_ID="$session_id"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "failed to create session" >&2
+  return 1
 }
 
-SESSION_ID="$(create_session | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')"
-if [[ -z "$SESSION_ID" ]]; then
-  echo "failed to create session" >&2
-  exit 1
-fi
+SESSION_ID=""
+create_session
+
 echo "session id: $SESSION_ID"
 
 RESP="$(curl -s -X POST "$ENVY/" \
