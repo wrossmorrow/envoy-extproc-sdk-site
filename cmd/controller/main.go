@@ -31,6 +31,9 @@ func main() {
 	path, h := v1connect.NewDemoControllerServiceHandler(handler)
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	srv := &http.Server{Addr: listenAddr, Handler: mux}
 
 	// gRPC server hosting the demo controller (human-facing) and demo processor
