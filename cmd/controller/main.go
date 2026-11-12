@@ -42,7 +42,7 @@ func main() {
 		return
 	}
 	go func() {
-		if err := gRPCServer.Serve(gRPCListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := gRPCServer.Serve(gRPCListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			slog.Error("controller gRPC server error", "error", err.Error())
 		}
 	}()
