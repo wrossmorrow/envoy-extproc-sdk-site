@@ -14,11 +14,11 @@ PHASE="${PHASE:-PHASE_REQUEST_HEADERS}"
 DECISION="${DECISION:-}"
 
 create_session() {
-  local session_id
+  local resp session_id
   for _i in $(seq 1 30); do
-    session_id="$(curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/CreateSession" \
-      -H 'content-type: application/json' -d '{}')"
-    session_id="$(printf '%s' "$session_id" | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    resp="$(curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/CreateSession" \
+      -H 'content-type: application/json' -d '{}' || true)"
+    session_id="$(printf '%s' "$resp" | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')" || true
     if [[ -n "$session_id" ]]; then
       SESSION_ID="$session_id"
       return 0
@@ -37,7 +37,7 @@ echo "session id: $SESSION_ID"
 RESP="$(curl -s -X POST "$ENVY/" \
   -H 'content-type: application/json' \
   -H "$SESSION_HEADER: $SESSION_ID" \
-  -d '{"hello":"world"}')"
+  -d '{"hello":"world"}')" || true
 echo "envoy-bound response: $RESP"
 
 if [[ -z "$DECISION" ]]; then
