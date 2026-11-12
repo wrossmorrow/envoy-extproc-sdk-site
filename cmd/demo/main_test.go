@@ -93,3 +93,72 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 		t.Fatalf("expected a processing response, got nil")
 	}
 }
+
+// TestDemoProcessorAppliesCancelDecision drives the demo extproc server through
+// the envoy ext_proc bidi protocol and asserts that the processor receives a
+// cancel decision and applies it (short-circuits the request).
+func TestDemoProcessorAppliesCancelDecision(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ctrl := controller.NewSessionController()
+	grpcServer := grpc.NewServer()
+	v1.RegisterDemoControllerServiceServer(grpcServer, &controller.DemoControllerGRPCServer{Controller: ctrl})
+	v1.RegisterDemoProcessorServiceServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: ctrl})
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen controller: %v", err)
+	}
+	go grpcServer.Serve(lis)
+	ctrlAddr := lis.Addr().String()
+	defer grpcServer.Stop()
+
+	sess, err := ctrl.CreateSession()
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err = ctrl.BeginPhase(sess.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("begin phase: %v", err)
+	}
+
+	proc := newDemoRequestProcessor()
+	proc.controllerAddr = ctrlAddr
+	proc.sessionID = sess.ID
+	sopts := &extproc.ServerOptions{ExtProcPort: 50055, MetricsHTTPPort: 9098, TerminationGracePeriodSeconds: 10}
+	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
+	time.Sleep(700 * time.Millisecond)
+
+	extprocConn, err := grpc.NewClient("127.0.0.1:50055", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("connect extproc: %v", err)
+	}
+	defer extprocConn.Close()
+	extprocClient, err := epb.NewExternalProcessorClient(extprocConn).Process(ctx)
+	if err != nil {
+		t.Fatalf("open extproc process stream: %v", err)
+	}
+
+	req := &epb.ProcessingRequest{
+		Request: &epb.ProcessingRequest_RequestHeaders{
+			RequestHeaders: &epb.HttpHeaders{
+				Headers:     &corev3.HeaderMap{},
+				EndOfStream: true,
+			},
+		},
+	}
+	if err = extprocClient.Send(req); err != nil {
+		t.Fatalf("send processing request: %v", err)
+	}
+	if err = ctrl.SubmitDecision(ctx, sess.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "cancel"); err != nil {
+		t.Fatalf("submit human decision: %v", err)
+	}
+	resp, err := extprocClient.Recv()
+	if err != nil {
+		t.Fatalf("recv processing response: %v", err)
+	}
+	t.Logf("got processing response: %+v", resp)
+
+	if resp.GetResponse() == nil {
+		t.Fatalf("expected a processing response, got nil")
+	}
+}

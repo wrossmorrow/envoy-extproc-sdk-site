@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	connect "connectrpc.com/connect"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 )
 
@@ -142,6 +143,66 @@ func TestSessionController_ResolveDecision_RejectsWhenNotInFlight(t *testing.T) 
 	}
 	if _, err := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err == nil {
 		t.Fatalf("ResolveDecision() error = nil, want %v", errSessionNotInFlight)
+	}
+}
+
+func TestDemoControllerHandler_SubmitDecision_MapsContinue(t *testing.T) {
+	c := NewSessionController()
+	h := &DemoControllerHandler{Controller: c}
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	resp, err := h.SubmitDecision(context.Background(), connect.NewRequest(&v1.SubmitDecisionRequest{
+		SessionId: s.ID,
+		Phase:     v1.Phase_PHASE_REQUEST_HEADERS,
+		Decision:  &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}},
+	}))
+	if err != nil {
+		t.Fatalf("SubmitDecision() error = %v, want nil", err)
+	}
+	if resp == nil {
+		t.Fatalf("SubmitDecision() response = nil, want response")
+	}
+	if s.Status != SessionStatusResolved {
+		t.Fatalf("SubmitDecision() Status = %v, want %v", s.Status, SessionStatusResolved)
+	}
+	res := <-s.Pending.Ch
+	if res.Action != "continue" {
+		t.Fatalf("SubmitDecision() resolved action = %q, want %q", res.Action, "continue")
+	}
+}
+
+func TestDemoControllerHandler_SubmitDecision_MapsCancel(t *testing.T) {
+	c := NewSessionController()
+	h := &DemoControllerHandler{Controller: c}
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	resp, err := h.SubmitDecision(context.Background(), connect.NewRequest(&v1.SubmitDecisionRequest{
+		SessionId: s.ID,
+		Phase:     v1.Phase_PHASE_REQUEST_HEADERS,
+		Decision:  &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: 403, Headers: map[string]string{}}}},
+	}))
+	if err != nil {
+		t.Fatalf("SubmitDecision() error = %v, want nil", err)
+	}
+	if resp == nil {
+		t.Fatalf("SubmitDecision() response = nil, want response")
+	}
+	if s.Status != SessionStatusResolved {
+		t.Fatalf("SubmitDecision() Status = %v, want %v", s.Status, SessionStatusResolved)
+	}
+	res := <-s.Pending.Ch
+	if res.Action != "cancel" {
+		t.Fatalf("SubmitDecision() resolved action = %q, want %q", res.Action, "cancel")
 	}
 }
 

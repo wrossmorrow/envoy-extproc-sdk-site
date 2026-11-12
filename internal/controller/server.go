@@ -225,12 +225,17 @@ func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.
 	})
 }
 
+// decisionAction maps a decision to a human action ("continue" or "cancel").
+func decisionAction(decision *v1.Decision) string {
+	if decision != nil && decision.GetCancel() != nil {
+		return "cancel"
+	}
+	return "continue"
+}
+
 // SubmitDecision submits a human decision for a session at a phase.
 func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error) {
-	action := "continue"
-	if req.Msg.GetDecision().GetCancel() != nil {
-		action = "cancel"
-	}
+	action := decisionAction(req.Msg.GetDecision())
 	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), action); err != nil {
 		return nil, err
 	}
