@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"os"
 
-	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
-	extproc "github.com/wrossmorrow/envoy-exproc-sdk-go"
+	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

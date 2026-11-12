@@ -1,11 +1,11 @@
 # envoy-extproc-sdk-site
 
 ## Layout
-- `proto/` is the only place .proto files live; paths mirror packages
-  (`proto/demo/controller/v1/` ↔ `package demo.controller.v1`). `buf lint` (STANDARD) must pass.
+- `proto/` is the only place `.proto` files live.
 - `gen/go/` holds generated code only. Regenerate with `just gen`; never edit it by hand.
-- `demo/`: envoy external processor, implements a client for `DemoProcessor`
-- `controller/`: connectrpc server for `DemoController`, gRPC server for `DemoProcessor`
+- `internal/demo` and `cmd/demo`: envoy external processor, implements a client for `DemoProcessor`
+- `internal/controller/` and `cmd/controller`: connectrpc server for `DemoController`, gRPC server for `DemoProcessor`
+- `*/demo` code should **not** import `controller` code except for testing routines
 
 ## Contracts
 - Services talk only through the protos in `proto/`; no shared Go packages across services

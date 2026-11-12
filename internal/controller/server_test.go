@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 )
 
 func TestSessionController_CreateSession(t *testing.T) {

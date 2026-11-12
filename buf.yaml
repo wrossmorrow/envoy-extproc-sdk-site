@@ -1,14 +1,13 @@
-version: v1
+version: v2
+modules:
+  - path: proto
 deps: []
-build:
-  excludes: []
 lint:
   use:
     - STANDARD
   except: []
   ignore: []
   ignore_only: {}
-  allow_comment_ignores: false
   enum_zero_value_suffix: _UNSPECIFIED
   rpc_allow_same_request_response: false
   rpc_allow_google_protobuf_empty_requests: false

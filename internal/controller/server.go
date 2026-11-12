@@ -7,8 +7,8 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
-	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
-	v1connect "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1/controllerv1connect"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
+	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
 )
 
 // SessionStatus reflects the lifecycle state of a demo session.

@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	"log/slog"
+
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	epb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	"github.com/wrossmorrow/envoy-exproc-sdk-controller/controller"
-	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
-	extproc "github.com/wrossmorrow/envoy-exproc-sdk-go"
+	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
+	"github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"log/slog"
 )
 
 // TestDemoProcessorSendsPhaseAndAppliesDecision drives the demo extproc server

@@ -2,9 +2,10 @@ package controller
 
 import (
 	"context"
-	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
-	grpc "google.golang.org/grpc"
 	"io"
+
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
+	grpc "google.golang.org/grpc"
 )
 
 // DemoControllerGRPCServer implements the DemoControllerService gRPC service. It

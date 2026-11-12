@@ -13,9 +13,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/wrossmorrow/envoy-exproc-sdk-controller/controller"
-	v1 "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1"
-	v1connect "github.com/wrossmorrow/envoy-exproc-sdk-controller/gen/go/proto/demo/controller/v1/controllerv1connect"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
+	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
+	controller "github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
 )
 
 const (
