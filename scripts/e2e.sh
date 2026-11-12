@@ -8,7 +8,7 @@
 set -euo pipefail
 
 CONTROLLER="${CONTROLLER:-http://localhost:9092}"
-ENVY="${ENVY:-http://localhost:8080}"
+ENVOY="${ENVOY:-http://localhost:8080}"
 SESSION_HEADER="${SESSION_HEADER:-x-demo-session-id}"
 PHASE="${PHASE:-PHASE_REQUEST_HEADERS}"
 DECISION="${DECISION:-}"
@@ -16,13 +16,14 @@ DECISION="${DECISION:-}"
 create_session() {
   local resp session_id
   for _i in $(seq 1 30); do
-    resp="$(curl -s -X POST "$CONTROLLER/controller.v1.DemoControllerService/CreateSession" \
-      -H 'content-type: application/json' -d '{}' || true)"
+    resp="$( curl -s -X POST "$CONTROLLER/controller.v1.DemoControllerService/CreateSession" \
+      -H 'content-type: application/json' -d '{}' || true )"
     session_id="$(printf '%s' "$resp" | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')" || true
     if [[ -n "$session_id" ]]; then
       SESSION_ID="$session_id"
       return 0
     fi
+    echo "failed to create session (attempt ${_i})" >&2
     sleep 1
   done
   echo "failed to create session" >&2

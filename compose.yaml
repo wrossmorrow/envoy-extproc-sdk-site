@@ -22,7 +22,7 @@ services:
       - -port=8000
       - -name=demo
     ports:
-      - "8000:8000"
+      - "8005:8000"
     networks:
       - demo
 
@@ -56,7 +56,7 @@ services:
         CMD: demo
     ports:
       - "50051:50051"
-      - "9090:9090"
+      - "9094:9090"
     healthcheck:
       test: ["CMD", "/grpc-health-probe", "-addr=localhost:50051"]
       interval: 2s
