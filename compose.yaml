@@ -28,7 +28,7 @@ services:
 
   # controller service
   controller:
-    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-cntrl:${CONTROLLER_VERSION:-local}
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-controller:${CONTROLLER_VERSION:-local}
     build:
       context: .
       dockerfile: Dockerfile
