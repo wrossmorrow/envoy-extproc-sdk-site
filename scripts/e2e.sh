@@ -16,7 +16,7 @@ DECISION="${DECISION:-}"
 create_session() {
   local resp session_id
   for _i in $(seq 1 30); do
-    resp="$(curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/CreateSession" \
+    resp="$(curl -s -X POST "$CONTROLLER/controller.v1.DemoControllerService/CreateSession" \
       -H 'content-type: application/json' -d '{}' || true)"
     session_id="$(printf '%s' "$resp" | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')" || true
     if [[ -n "$session_id" ]]; then
@@ -43,7 +43,7 @@ echo "envoy-bound response: $RESP"
 if [[ -z "$DECISION" ]]; then
   DECISION="{\"session_id\":\"$SESSION_ID\",\"phase\":\"$PHASE\",\"decision\":{\"continue\":{}}}"
 fi
-curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/SubmitDecision" \
+curl -s -X POST "$CONTROLLER/controller.v1.DemoControllerService/SubmitDecision" \
   -H 'content-type: application/json' \
   -d "$DECISION"
 echo
