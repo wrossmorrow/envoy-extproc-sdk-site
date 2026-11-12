@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	"google.golang.org/grpc"
+	hpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
@@ -34,6 +36,7 @@ func main() {
 	// gRPC server hosting the demo controller (human-facing) and demo processor
 	// (internal channel) services, sharing the same session controller.
 	gRPCServer := grpc.NewServer()
+	hpb.RegisterHealthServer(gRPCServer, extproc.NewReadyHealthServer())
 	v1.RegisterDemoControllerServiceServer(gRPCServer, &controller.DemoControllerGRPCServer{Controller: sessCtrl})
 	v1.RegisterDemoProcessorServiceServer(gRPCServer, &controller.DemoProcessorGRPCServer{Controller: sessCtrl})
 	gRPCListener, err := net.Listen("tcp", grpcAddr)
