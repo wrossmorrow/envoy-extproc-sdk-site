@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# End-to-end smoke test for the envoy extproc demo compose stack.
+#
+# Prerequisites: docker compose up --build (or: just up)
+# Usage:
+#   ./scripts/e2e.sh
+#   PHASE=PHASE_REQUEST_BODY DECISION='{"session_id":"...","phase":"PHASE_REQUEST_BODY","decision":{"cancel":{"status":503}}}' ./scripts/e2e.sh
+set -euo pipefail
+
+CONTROLLER="${CONTROLLER:-http://localhost:9092}"
+ENVY="${ENVY:-http://localhost:8080}"
+SESSION_HEADER="${SESSION_HEADER:-x-demo-session-id}"
+PHASE="${PHASE:-PHASE_REQUEST_HEADERS}"
+DECISION="${DECISION:-}"
+
+create_session() {
+  curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/CreateSession" \
+    -H 'content-type: application/json' -d '{}'
+}
+
+SESSION_ID="$(create_session | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')"
+if [[ -z "$SESSION_ID" ]]; then
+  echo "failed to create session" >&2
+  exit 1
+fi
+echo "session id: $SESSION_ID"
+
+RESP="$(curl -s -X POST "$ENVY/" \
+  -H 'content-type: application/json' \
+  -H "$SESSION_HEADER: $SESSION_ID" \
+  -d '{"hello":"world"}')"
+echo "envoy-bound response: $RESP"
+
+if [[ -z "$DECISION" ]]; then
+  DECISION="{\"session_id\":\"$SESSION_ID\",\"phase\":\"$PHASE\",\"decision\":{\"continue\":{}}}"
+fi
+curl -s -X POST "$CONTROLLER/demo.controller.v1.DemoControllerService/SubmitDecision" \
+  -H 'content-type: application/json' \
+  -d "$DECISION"
+echo
