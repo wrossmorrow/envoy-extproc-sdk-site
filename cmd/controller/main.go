@@ -13,19 +13,19 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/wrossmorrow/envoy-extproc-sdk-controller/controller"
-	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
-	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1/v1connect"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
+	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
+	controller "github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
 )
 
 const (
-	listenAddr = "127.0.0.1:9092"
-	grpcAddr   = "127.0.0.1:9093"
+	listenAddr = "0.0.0.0:9092"
+	grpcAddr   = "0.0.0.0:9093"
 )
 
 func main() {
 	handler := &controller.DemoControllerHandler{Controller: controller.NewSessionController()}
-	path, h := v1connect.NewDemoControllerHandler(handler)
+	path, h := v1connect.NewDemoControllerServiceHandler(handler)
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	srv := &http.Server{Addr: listenAddr, Handler: mux}
@@ -33,8 +33,8 @@ func main() {
 	// gRPC server hosting the demo controller (human-facing) and demo processor
 	// (internal channel) services.
 	gRPCServer := grpc.NewServer()
-	v1.RegisterDemoControllerServer(gRPCServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
-	v1.RegisterDemoProcessorServer(gRPCServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoControllerServiceServer(gRPCServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoProcessorServiceServer(gRPCServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
 	gRPCListener, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		slog.Error("controller gRPC server error", "error", err.Error())

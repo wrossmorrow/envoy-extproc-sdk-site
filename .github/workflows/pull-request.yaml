@@ -1,0 +1,50 @@
+name: Pull Request Checks
+on:
+  pull_request:
+    paths:
+      - '**/*.go'
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+      - name: Check build(s)
+        run: |
+          go build -o /dev/null ./...
+      # test/Dockerfile is covered by the integration job, but o/w examples/Dockerfile not covered
+      - name: Check image builds
+        run: |
+          docker build --build-arg CMD=controller .
+          docker build --build-arg CMD=demo .
+  vet-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+      - name: Vet the main library
+        run: |
+          go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@latest
+          go vet -vettool=$(go env GOPATH)/bin/shadow ./...
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+      - name: Unit tests
+        run: go test -v -race ./...

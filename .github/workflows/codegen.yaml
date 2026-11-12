@@ -1,0 +1,34 @@
+name: Proto Sync Check
+on:
+  pull_request:
+    paths:
+      - 'proto/**'
+      - 'gen/go/**'
+      - 'buf.gen.yaml'
+      - 'buf.yaml'
+jobs:
+  check-gen-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+      - name: Set up Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: Regenerate code
+        run: |
+          buf generate
+          go mod tidy
+      - name: Verify clean working directory
+        run: |
+          if ! test -z "$(git status --porcelain gen/go)"; then
+            echo "Error: gen/go is out of sync with proto/ definitions."
+            echo "Run 'buf generate' locally and commit the changes."
+            exit 1
+          fi

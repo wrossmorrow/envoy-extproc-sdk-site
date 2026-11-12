@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	"log/slog"
+
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	epb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	"github.com/wrossmorrow/envoy-extproc-sdk-controller/controller"
-	v1 "github.com/wrossmorrow/envoy-extproc-sdk-controller/demo/controller/v1"
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
+	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
+	"github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"log/slog"
 )
 
 // TestDemoProcessorSendsPhaseAndAppliesDecision drives the demo extproc server
@@ -25,8 +26,8 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 
 	// Start controller gRPC server (controller side of the Process bidi).
 	grpcServer := grpc.NewServer()
-	v1.RegisterDemoControllerServer(grpcServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
-	v1.RegisterDemoProcessorServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoControllerServiceServer(grpcServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoProcessorServiceServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen controller: %v", err)
@@ -61,7 +62,7 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 			},
 		},
 	}
-	if err := extprocClient.Send(req); err != nil {
+	if err = extprocClient.Send(req); err != nil {
 		t.Fatalf("send processing request: %v", err)
 	}
 	resp, err := extprocClient.Recv()
