@@ -59,6 +59,7 @@ type DemoProcessorGRPCServer struct {
 // initiates on request receipt and sends phase updates, the controller sends
 // decisions back.
 func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.ProcessRequest, v1.ProcessResponse]) error {
+	ctx := stream.Context()
 	for {
 		update, err := stream.Recv()
 		if err != nil {
@@ -68,12 +69,16 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 			break
 		}
 
-		decision := &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}
-		if err := stream.Send(&v1.ProcessResponse{
-			SessionId: update.SessionId,
-			Phase:     update.Phase,
-			Decision:  decision,
-		}); err != nil {
+		// A phase update means the session is now in flight at that phase; await
+		// the human decision (or phase timeout) and reply over the stream.
+		if err = s.Controller.BeginPhase(update.SessionId, int32(update.Phase)); err != nil {
+			return err
+		}
+		decision, err := s.Controller.ResolveDecision(ctx, update.SessionId, int32(update.Phase))
+		if err != nil {
+			return err
+		}
+		if err = stream.Send(decision); err != nil {
 			return err
 		}
 	}

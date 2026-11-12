@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -47,6 +48,7 @@ type pendingResolution struct {
 
 // SessionController owns demo sessions and their pending decisions/updates.
 type SessionController struct {
+	mu       sync.Mutex
 	sessions map[string]*Session
 }
 
@@ -62,6 +64,8 @@ func NewSessionController() *SessionController {
 }
 
 func (c *SessionController) CreateSession() (*Session, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	s := &Session{
 		ID:        newSessionID(),
 		Status:    SessionStatusNew,
@@ -74,6 +78,8 @@ func (c *SessionController) CreateSession() (*Session, error) {
 }
 
 func (c *SessionController) GetSession(id string) (*Session, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	s, ok := c.sessions[id]
 	if !ok {
 		return nil, errSessionNotFound
@@ -102,9 +108,11 @@ func (c *SessionController) GetUpdates(id string, send func(*v1.CreateSessionRes
 }
 
 func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, action string) error {
-	s, err := c.GetSession(id)
-	if err != nil {
-		return err
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return errSessionNotFound
 	}
 	if s.Status != SessionStatusInFlight {
 		return errSessionNotInFlight
@@ -119,6 +127,75 @@ func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase
 	s.Pending.Ch <- res
 	s.Status = SessionStatusResolved
 	return nil
+}
+
+// PhaseTimeout is how long ResolveDecision waits for a human decision on a
+// session phase before failing the phase closed with an immediate cancel.
+const PhaseTimeout = 30 * time.Second
+
+// ResolveDecision resolves the decision for a session phase and returns the
+// decision to send back to the extproc over the Process bidi stream. It awaits
+// the pending human decision (see SubmitDecision) and, on phase timeout, fails
+// closed with an immediate cancel decision.
+func (c *SessionController) ResolveDecision(ctx context.Context, sessionID string, phase int32) (*v1.ProcessResponse, error) {
+	c.mu.Lock()
+	s, ok := c.sessions[sessionID]
+	c.mu.Unlock()
+	if !ok {
+		return nil, errSessionNotFound
+	}
+	if s.Status != SessionStatusInFlight {
+		return nil, errSessionNotInFlight
+	}
+	if phase != s.Phase {
+		return nil, errPhaseMismatch
+	}
+	c.mu.Lock()
+	if s.Pending == nil {
+		s.Pending = &pendingDecision{Phase: phase}
+	}
+	if s.Pending.Ch == nil {
+		s.Pending.Ch = make(chan *pendingResolution, 1)
+	}
+	c.mu.Unlock()
+	select {
+	case res := <-s.Pending.Ch:
+		return decisionResponse(s, phase, res.Action), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(PhaseTimeout):
+		return decisionResponse(s, phase, "cancel"), nil
+	}
+}
+
+// BeginPhase transitions a session into in-flight at a phase and opens a
+// pending decision channel for the human to resolve.
+func (c *SessionController) BeginPhase(id string, phase int32) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return errSessionNotFound
+	}
+	s.Status = SessionStatusInFlight
+	s.Phase = phase
+	if s.Pending == nil {
+		s.Pending = &pendingDecision{Phase: phase}
+	}
+	if s.Pending.Ch == nil {
+		s.Pending.Ch = make(chan *pendingResolution, 1)
+	}
+	return nil
+}
+
+// decisionResponse builds the ProcessResponse decision for a session phase
+// from a human action ("continue" or "cancel").
+func decisionResponse(s *Session, phase int32, action string) *v1.ProcessResponse {
+	decision := &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}
+	if action == "cancel" {
+		decision.Action = &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusGatewayTimeout, Headers: map[string]string{}}}
+	}
+	return &v1.ProcessResponse{SessionId: s.ID, Phase: v1.Phase(phase), Decision: decision}
 }
 
 // DemoControllerHandler implements the Connect service.

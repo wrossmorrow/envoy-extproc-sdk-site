@@ -25,9 +25,10 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	defer cancel()
 
 	// Start controller gRPC server (controller side of the Process bidi).
+	ctrl := controller.NewSessionController()
 	grpcServer := grpc.NewServer()
-	v1.RegisterDemoControllerServiceServer(grpcServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
-	v1.RegisterDemoProcessorServiceServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoControllerServiceServer(grpcServer, &controller.DemoControllerGRPCServer{Controller: ctrl})
+	v1.RegisterDemoProcessorServiceServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: ctrl})
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen controller: %v", err)
@@ -36,9 +37,20 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	ctrlAddr := lis.Addr().String()
 	defer grpcServer.Stop()
 
+	// Create a session and open the human decision for its first phase.
+	sess, err := ctrl.CreateSession()
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessID := sess.ID
+	if err = ctrl.BeginPhase(sessID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("begin phase: %v", err)
+	}
+
 	// Start demo extproc server (processor side of the Process bidi).
 	proc := newDemoRequestProcessor()
 	proc.controllerAddr = ctrlAddr
+	proc.sessionID = sessID
 	sopts := &extproc.ServerOptions{ExtProcPort: 50053, MetricsHTTPPort: 9099, TerminationGracePeriodSeconds: 10}
 	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
 	time.Sleep(700 * time.Millisecond)
@@ -64,6 +76,11 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	}
 	if err = extprocClient.Send(req); err != nil {
 		t.Fatalf("send processing request: %v", err)
+	}
+	// Human submits a decision for the session phase; the controller resolves
+	// it and replies over the bidi stream, which the demo processor applies.
+	if err = ctrl.SubmitDecision(ctx, sessID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "continue"); err != nil {
+		t.Fatalf("submit human decision: %v", err)
 	}
 	resp, err := extprocClient.Recv()
 	if err != nil {

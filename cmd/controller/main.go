@@ -24,17 +24,18 @@ const (
 )
 
 func main() {
-	handler := &controller.DemoControllerHandler{Controller: controller.NewSessionController()}
+	sessCtrl := controller.NewSessionController()
+	handler := &controller.DemoControllerHandler{Controller: sessCtrl}
 	path, h := v1connect.NewDemoControllerServiceHandler(handler)
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	srv := &http.Server{Addr: listenAddr, Handler: mux}
 
 	// gRPC server hosting the demo controller (human-facing) and demo processor
-	// (internal channel) services.
+	// (internal channel) services, sharing the same session controller.
 	gRPCServer := grpc.NewServer()
-	v1.RegisterDemoControllerServiceServer(gRPCServer, &controller.DemoControllerGRPCServer{Controller: controller.NewSessionController()})
-	v1.RegisterDemoProcessorServiceServer(gRPCServer, &controller.DemoProcessorGRPCServer{Controller: controller.NewSessionController()})
+	v1.RegisterDemoControllerServiceServer(gRPCServer, &controller.DemoControllerGRPCServer{Controller: sessCtrl})
+	v1.RegisterDemoProcessorServiceServer(gRPCServer, &controller.DemoProcessorGRPCServer{Controller: sessCtrl})
 	gRPCListener, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		slog.Error("controller gRPC server error", "error", err.Error())
