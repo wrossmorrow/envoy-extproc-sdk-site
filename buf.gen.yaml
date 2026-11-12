@@ -5,12 +5,12 @@ managed:
     - file_option: go_package_prefix
       value: github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go
 plugins:
-  - local: protoc-gen-go
+  - local: ["go", "tool", "protoc-gen-go"]
     out: gen/go
     opt: paths=source_relative
-  - local: protoc-gen-go-grpc
+  - local: ["go", "tool", "protoc-gen-go-grpc"]
     out: gen/go
     opt: paths=source_relative
-  - local: protoc-gen-connect-go
+  - local: ["go", "tool", "protoc-gen-connect-go"]
     out: gen/go
     opt: paths=source_relative
