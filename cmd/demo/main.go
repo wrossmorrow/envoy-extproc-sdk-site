@@ -78,7 +78,7 @@ func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessi
 	if err != nil {
 		return nil, err
 	}
-	if err := stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase)}); err != nil {
+	if err = stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase)}); err != nil {
 		return nil, err
 	}
 	dec, err := stream.Recv()

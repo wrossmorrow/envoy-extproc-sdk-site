@@ -62,7 +62,7 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 			},
 		},
 	}
-	if err := extprocClient.Send(req); err != nil {
+	if err = extprocClient.Send(req); err != nil {
 		t.Fatalf("send processing request: %v", err)
 	}
 	resp, err := extprocClient.Recv()
