@@ -131,7 +131,7 @@ func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase
 
 // PhaseTimeout is how long ResolveDecision waits for a human decision on a
 // session phase before failing the phase closed with an immediate cancel.
-const PhaseTimeout = 30 * time.Second
+var PhaseTimeout = 30 * time.Second
 
 // ResolveDecision resolves the decision for a session phase and returns the
 // decision to send back to the extproc over the Process bidi stream. It awaits
