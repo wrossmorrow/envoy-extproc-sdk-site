@@ -7,6 +7,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 )
 
@@ -25,6 +26,23 @@ func TestSessionController_CreateSession(t *testing.T) {
 	}
 	if s.Updates == nil {
 		t.Fatalf("CreateSession() Updates = nil, want non-nil updates channel")
+	}
+}
+
+func TestSessionController_CreateSession_GeneratesUUIDv7SessionID(t *testing.T) {
+	c := NewSessionController()
+	for i := 0; i < 2; i++ {
+		s, err := c.CreateSession()
+		if err != nil {
+			t.Fatalf("CreateSession() error = %v, want nil", err)
+		}
+		u, err := uuid.Parse(s.ID)
+		if err != nil {
+			t.Fatalf("CreateSession() ID = %q, want valid UUID: %v", s.ID, err)
+		}
+		if u.Version() != 7 {
+			t.Fatalf("CreateSession() ID = %q, want UUID version 7, got version %d", s.ID, u.Version())
+		}
 	}
 }
 

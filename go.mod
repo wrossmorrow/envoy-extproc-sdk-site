@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	connectrpc.com/connect v1.21.1
 	github.com/envoyproxy/go-control-plane/envoy v1.39.1-0.20260819172001-e6e3fd93e4be
+	github.com/google/uuid v1.6.0
 	github.com/wrossmorrow/envoy-extproc-sdk-go v0.2.1
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12

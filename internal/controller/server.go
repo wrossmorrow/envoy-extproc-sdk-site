@@ -8,6 +8,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
 )
@@ -282,7 +283,7 @@ func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect
 	return &connect.Response[v1.SubmitDecisionResponse]{}, nil
 }
 
-// newSessionID returns a new session id.
+// newSessionID returns a new session id, a UUID version 7 (time-ordered) value.
 func newSessionID() string {
-	return "session"
+	return uuid.Must(uuid.NewV7()).String()
 }

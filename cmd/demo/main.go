@@ -14,7 +14,6 @@ import (
 const (
 	defaultControllerAddr = "controller:9093"
 	sessionIDHeader       = "x-demo-session-id"
-	defaultSessionID      = "session"
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -39,7 +38,7 @@ func newDemoRequestProcessor() *demoRequestProcessor {
 	return &demoRequestProcessor{
 		opts:           &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
 		logger:         slog.Default(),
-		sessionID:      defaultSessionID,
+		sessionID:      "",
 		controllerAddr: addr,
 	}
 }
