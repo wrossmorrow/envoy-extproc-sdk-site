@@ -72,19 +72,32 @@ func main() {
 	// The call only returns once the demo has applied the decision, so run it
 	// concurrently with the human decision submission.
 	envoyDone := make(chan error, 1)
+	envoyDoneClosed := make(chan struct{})
 	go func() {
 		envoyDone <- sendEnvoyBound(ctx, envoyAddr, sessionID)
+		close(envoyDoneClosed)
 	}()
 
 	// Drain the create-session stream, submitting a human decision for each
-	// phase update as it arrives.
-	for upd := range updates {
-		log.Printf("Update received: %v\n", upd)
-		if upd.GetSessionId() != sessionID {
-			fatal(fmt.Errorf("session ID mismatch: %s vs %s (%v)", upd.GetSessionId(), sessionID, upd))
-		}
-		if err := submitDecision(ctx, client, sessionID, upd.Phase, decisionAction); err != nil {
-			fatal(err)
+	// phase update as it arrives. End the drain when the envoy-bound phase
+	// request completes (the demo applied the final decision and envoy has
+	// answered), instead of waiting for the create-session stream to close.
+phaseUpdates:
+	for {
+		select {
+		case upd, ok := <-updates:
+			if !ok {
+				break phaseUpdates
+			}
+			log.Printf("Update received: %v\n", upd)
+			if upd.GetSessionId() != sessionID {
+				fatal(fmt.Errorf("session ID mismatch: %s vs %s (%v)", upd.GetSessionId(), sessionID, upd))
+			}
+			if err := submitDecision(ctx, client, sessionID, upd.Phase, decisionAction); err != nil {
+				fatal(err)
+			}
+		case <-envoyDoneClosed:
+			break phaseUpdates
 		}
 	}
 
