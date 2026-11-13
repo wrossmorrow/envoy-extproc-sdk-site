@@ -98,9 +98,9 @@ func sendEnvoyBound(ctx context.Context, addr, sessionID string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("envoy-bound phase request failed: status %d", resp.StatusCode)
+		return fmt.Errorf("envoy-bound phase request failed: status %d body=%q", resp.StatusCode, string(respBody))
 	}
 	return nil
 }
