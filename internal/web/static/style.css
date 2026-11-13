@@ -153,6 +153,27 @@ main { padding-top: 1.25rem; padding-bottom: 2rem; }
 .proc[data-state="replied"] { border-style: solid; border-color: var(--border); color: var(--text-2); }
 .proc[data-state="rejected"] { border-style: solid; border-color: var(--bad); background: var(--bad-bg); color: var(--bad); }
 
+/* Pinned flow: a condensed copy slides in as a fixed overlay once the full
+   flow scrolls out of view. Fixed, so it never changes layout (no scroll jank). */
+.pinned-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  transform: translateY(-100%); visibility: hidden;
+  transition: transform 0.15s ease-out, visibility 0.15s;
+}
+.pinned-bar.visible { transform: none; visibility: visible; }
+.pinned-bar .flow { max-width: 72rem; margin: 0 auto; padding: 0.35rem 1rem 0.25rem; }
+.pinned-bar .envoy-band, .pinned-bar .proc, .pinned-bar .lane-label.r4 { display: none; }
+.pinned-bar .step { padding: 0.15rem 0.3rem; }
+.pinned-bar .msg { min-height: 1.1rem; }
+
+/* Decision buttons stay reachable while scrolling a long snapshot */
+.decision-bar {
+  position: sticky; bottom: 0; background: var(--surface);
+  margin: 0.75rem -1.15rem -1rem; padding: 0.1rem 1.15rem 0.85rem;
+  border-top: 1px solid var(--border); border-radius: 0 0 12px 12px;
+}
+
 @media (max-width: 760px) {
   .flow { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
   .lane-label, .envoy-band, .msg, .proc { display: none; }

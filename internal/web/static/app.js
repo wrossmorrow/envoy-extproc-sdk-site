@@ -582,9 +582,17 @@ function showDecisionError(message) {
   $("btn-cancel").disabled = false;
 }
 
+// flowRoots returns the full flow and its pinned copy, kept in sync.
+function flowRoots() {
+  return document.querySelectorAll(".flow");
+}
+
 function resetSteps() {
   state.steps = {};
-  const root = $("pipeline");
+  for (const root of flowRoots()) resetFlow(root);
+}
+
+function resetFlow(root) {
   for (const node of root.querySelectorAll(".step, .proc")) delete node.dataset.state;
   for (const node of root.querySelectorAll(".proc-sub")) node.textContent = "";
   for (const node of root.querySelectorAll(".msg")) {
@@ -598,7 +606,10 @@ function resetSteps() {
 // the phase's ProcessingRequest), the up arrow (the processor's reply) and the
 // processor box beneath it.
 function setLane(phase, opts) {
-  const root = $("pipeline");
+  for (const root of flowRoots()) setLaneIn(root, phase, opts);
+}
+
+function setLaneIn(root, phase, opts) {
   const msg = root.querySelector('[data-msg="' + phase + '"]');
   const proc = root.querySelector('[data-proc="' + phase + '"]');
   if (msg) {
@@ -616,8 +627,10 @@ function setLane(phase, opts) {
 
 function setStep(step, stepState) {
   state.steps[step] = stepState;
-  const li = $("pipeline").querySelector('[data-step="' + step + '"]');
-  if (li) li.dataset.state = stepState;
+  for (const root of flowRoots()) {
+    const node = root.querySelector('[data-step="' + step + '"]');
+    if (node) node.dataset.state = stepState;
+  }
 }
 
 function log(text, kind) {
@@ -682,8 +695,26 @@ function bind() {
   }
 }
 
+// pinFlow shows a condensed copy of the flow, fixed to the top of the window,
+// whenever the full flow has scrolled up out of view. The copy is an overlay,
+// so showing it never changes layout.
+function pinFlow() {
+  const flow = $("pipeline");
+  const pinned = flow.cloneNode(true);
+  pinned.id = "pipeline-pinned";
+  pinned.removeAttribute("aria-label");
+  const bar = el("div", { class: "pinned-bar", "aria-hidden": "true" });
+  bar.append(pinned);
+  document.body.append(bar);
+  if (!("IntersectionObserver" in window)) return;
+  new IntersectionObserver(([entry]) => {
+    bar.classList.toggle("visible", !entry.isIntersecting && entry.boundingClientRect.top < 0);
+  }).observe(flow);
+}
+
 function init() {
   bind();
+  pinFlow();
   applyPreset(PRESETS[0]);
   addHeaderRow("x-demo-intercepted", "true");
   selectLang("go");

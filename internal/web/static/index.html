@@ -120,24 +120,26 @@
               <button type="button" class="ghost small" id="add-header">Add header</button>
             </fieldset>
 
-            <div class="actions">
-              <button type="button" class="primary" id="btn-continue">Continue</button>
-              <span class="or">or</span>
-              <button type="button" id="btn-cancel">Reject with</button>
-              <label class="sr-only" for="cancel-status">Status code</label>
-              <select id="cancel-status">
-                <option value="400">400</option>
-                <option value="401">401</option>
-                <option value="403" selected>403</option>
-                <option value="404">404</option>
-                <option value="418">418</option>
-                <option value="429">429</option>
-                <option value="503">503</option>
-              </select>
+            <div class="decision-bar">
+              <div class="actions">
+                <button type="button" class="primary" id="btn-continue">Continue</button>
+                <span class="or">or</span>
+                <button type="button" id="btn-cancel">Reject with</button>
+                <label class="sr-only" for="cancel-status">Status code</label>
+                <select id="cancel-status">
+                  <option value="400">400</option>
+                  <option value="401">401</option>
+                  <option value="403" selected>403</option>
+                  <option value="404">404</option>
+                  <option value="418">418</option>
+                  <option value="429">429</option>
+                  <option value="503">503</option>
+                </select>
+              </div>
+              <label class="field-label" for="cancel-body">Rejection body <span class="hint">optional</span></label>
+              <input id="cancel-body" type="text" placeholder="Blocked by the demo" />
+              <p class="error" id="decision-error" hidden></p>
             </div>
-            <label class="field-label" for="cancel-body">Rejection body <span class="hint">optional</span></label>
-            <input id="cancel-body" type="text" placeholder="Blocked by the demo" />
-            <p class="error" id="decision-error" hidden></p>
           </div>
         </section>
       </div>
