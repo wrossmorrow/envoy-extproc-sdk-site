@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Envoy ExtProc Interactive Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Envoy ExtProc Interactive Demo</h1>
+      <p class="lede">
+        Send a request through Envoy and watch the <code>ext_proc</code> processor
+        intercept it, phase by phase, while you decide what happens next.
+      </p>
+
+      <section class="panel" id="session-panel">
+        <h2>Session</h2>
+        <button id="new-session">New session</button>
+        <p id="session-status">No session yet.</p>
+        <p>
+          Session ID:
+          <code id="session-id">—</code>
+        </p>
+      </section>
+
+      <section class="panel" id="phase-panel">
+        <h2>Phase</h2>
+        <p id="phase-status">Create a session to begin.</p>
+        <div class="decisions">
+          <button id="btn-continue" disabled>Continue</button>
+          <button id="btn-cancel" disabled>Cancel</button>
+        </div>
+      </section>
+
+      <section class="panel" id="request-panel">
+        <h2>Envoy-bound request</h2>
+        <p id="envoy-status">No request sent yet.</p>
+        <button id="send-request" disabled>Send request through Envoy</button>
+        <h3>Envoy response</h3>
+        <pre id="envoy-response">—</pre>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

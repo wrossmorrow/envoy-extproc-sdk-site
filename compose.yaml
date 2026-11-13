@@ -34,6 +34,9 @@ services:
       dockerfile: Dockerfile
       args:
         CMD: controller
+    environment:
+      # upstream envoy for envoy-bound demo requests proxied by the web frontend
+      ENVOY_ADDR: envoy:8000
     ports:
       - "9093:9093"
       - "9092:9092"
