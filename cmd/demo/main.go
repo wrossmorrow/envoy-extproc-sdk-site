@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strconv"
 
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
@@ -127,18 +128,22 @@ func snapshotMasked(name string) bool {
 // for the phase being processed, from the observed headers and body. Body phases
 // report at most snapshotBodyLimit bytes; longer bodies are truncated and flagged
 // via BodyTruncated. Response phases surface the response status via the
-// ":status" header the data plane sends downstream.
+// ":status" header the data plane sends downstream. Headers are emitted in
+// sorted key order for deterministic snapshots.
 func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) *v1.HttpSnapshot {
 	snap := &v1.HttpSnapshot{}
+	headerList := make([]*v1.Header, 0, len(headers.Headers))
 	for name, values := range headers.Headers {
 		for _, v := range values {
 			if snapshotMasked(name) {
-				snap.Headers = append(snap.Headers, &v1.Header{Key: name, Value: fmt.Sprintf("[redacted %d chars]", len(v))})
+				headerList = append(headerList, &v1.Header{Key: name, Value: fmt.Sprintf("[redacted %d chars]", len(v))})
 				continue
 			}
-			snap.Headers = append(snap.Headers, &v1.Header{Key: name, Value: v})
+			headerList = append(headerList, &v1.Header{Key: name, Value: v})
 		}
 	}
+	sort.SliceStable(headerList, func(i, j int) bool { return headerList[i].GetKey() < headerList[j].GetKey() })
+	snap.Headers = headerList
 	if status, ok := headers.Get(":status"); ok {
 		if code, err := strconv.Atoi(status); err == nil {
 			snap.Status = int32(code)
