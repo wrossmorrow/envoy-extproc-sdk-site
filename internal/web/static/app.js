@@ -147,6 +147,21 @@ function renderEnvoyResponse() {
     : "—";
 }
 
+// frameConnectMessage frames a Connect JSON message as a length-prefixed
+// Connect envelope: 1 flag byte (0 for data) + 4-byte big-endian byte length
+// + UTF-8 JSON message bytes.
+function frameConnectMessage(body) {
+  const bytes = new TextEncoder().encode(body);
+  const frame = new Uint8Array(5 + bytes.length);
+  frame[0] = 0;
+  frame[1] = (bytes.length >>> 24) & 0xff;
+  frame[2] = (bytes.length >>> 16) & 0xff;
+  frame[3] = (bytes.length >>> 8) & 0xff;
+  frame[4] = bytes.length & 0xff;
+  frame.set(bytes, 5);
+  return frame;
+}
+
 async function fetchConnect(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -154,7 +169,7 @@ async function fetchConnect(url, body) {
       "Content-Type": CONNECT_CONTENT_TYPE,
       "Connect-Protocol-Version": CONNECT_PROTOCOL_VERSION,
     },
-    body: body,
+    body: frameConnectMessage(body),
   });
   if (!res.ok) {
     let detail = "";
