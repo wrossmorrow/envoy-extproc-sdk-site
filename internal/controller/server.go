@@ -30,13 +30,14 @@ type Update = v1.CreateSessionResponse
 
 // Session is a single interactive extproc demo session.
 type Session struct {
-	ID        string
-	Status    SessionStatus
-	Phase     int32
-	Pending   *pendingDecision
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	Updates   chan *Update
+	ID            string
+	Status        SessionStatus
+	Phase         int32
+	Pending       *pendingDecision
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	PhaseDeadline time.Time
+	Updates       chan *Update
 }
 
 type pendingDecision struct {
@@ -69,11 +70,12 @@ func (c *SessionController) CreateSession() (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := &Session{
-		ID:        newSessionID(),
-		Status:    SessionStatusNew,
-		Updates:   make(chan *Update, 16),
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(30 * time.Second),
+		ID:            newSessionID(),
+		Status:        SessionStatusNew,
+		Updates:       make(chan *Update, 16),
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(30 * time.Second),
+		PhaseDeadline: time.Now().Add(PhaseTimeout),
 	}
 	c.sessions[s.ID] = s
 	return s, nil
@@ -157,10 +159,16 @@ var PhaseTimeout = 30 * time.Second
 // decisions through the public SubmitDecision endpoint.
 var MaxCancelBodyBytes int64 = 64 * 1024 // 64 KiB
 
-// phaseDeadline returns the phase decision deadline carried on CreateSession
-// responses, derived from PhaseTimeout.
-func phaseDeadline() *timestamppb.Timestamp {
-	return timestamppb.New(time.Now().Add(PhaseTimeout))
+// PhaseDeadline returns the phase decision deadline recorded for the session
+// identified by id.
+func (c *SessionController) PhaseDeadline(id string) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return time.Time{}
+	}
+	return s.PhaseDeadline
 }
 
 // ResolveDecision resolves the decision for a session phase and returns the
@@ -193,7 +201,7 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 		return decisionResponse(s, phase, res.decision), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-time.After(PhaseTimeout):
+	case <-time.After(time.Until(s.PhaseDeadline)):
 		return decisionResponse(s, phase, nil), nil
 	}
 }
@@ -249,6 +257,7 @@ func (c *SessionController) BeginPhase(id string, phase int32) error {
 	}
 	s.Status = SessionStatusInFlight
 	s.Phase = phase
+	s.PhaseDeadline = time.Now().Add(PhaseTimeout)
 	if s.Pending == nil {
 		s.Pending = &pendingDecision{Phase: phase}
 	}
@@ -296,7 +305,7 @@ func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.
 	if err := stream.Send(&v1.CreateSessionResponse{
 		SessionId: s.ID,
 		Phase:     v1.Phase_PHASE_NOT_STARTED,
-		Deadline:  phaseDeadline(),
+		Deadline:  timestamppb.New(s.PhaseDeadline),
 	}); err != nil {
 		return err
 	}

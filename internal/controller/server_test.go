@@ -135,12 +135,12 @@ func TestSessionController_ResolveDecision_ReturnsCancelOnPhaseTimeout(t *testin
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v, want nil", err)
 	}
-	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
-		t.Fatalf("BeginPhase() error = %v, want nil", err)
-	}
 	oldTimeout := PhaseTimeout
 	PhaseTimeout = 50 * time.Millisecond
 	defer func() { PhaseTimeout = oldTimeout }()
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
 	dec, err := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS))
 	if err != nil {
 		t.Fatalf("ResolveDecision() error = %v, want nil", err)

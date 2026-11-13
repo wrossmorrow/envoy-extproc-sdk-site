@@ -6,6 +6,7 @@ import (
 
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	grpc "google.golang.org/grpc"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // DemoControllerGRPCServer implements the DemoControllerService gRPC service. It
@@ -28,7 +29,7 @@ func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, s
 	if err := stream.Send(&v1.CreateSessionResponse{
 		SessionId: sess.ID,
 		Phase:     v1.Phase_PHASE_NOT_STARTED,
-		Deadline:  phaseDeadline(),
+		Deadline:  timestamppb.New(sess.PhaseDeadline),
 	}); err != nil {
 		return err
 	}
@@ -80,7 +81,7 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 			SessionId: update.SessionId,
 			Phase:     phase,
 			Snapshot:  update.Snapshot,
-			Deadline:  phaseDeadline(),
+			Deadline:  timestamppb.New(s.Controller.PhaseDeadline(update.SessionId)),
 		}); err != nil {
 			return err
 		}
