@@ -185,6 +185,29 @@ func (c *SessionController) SendUpdate(id string, update *v1.CreateSessionRespon
 	}
 }
 
+// phaseFromExtproc converts an extproc phase number to the controller Phase
+// enum value used for session phases, aligning the extproc phase numbering with
+// the controller's Phase enum.
+func phaseFromExtproc(phase int32) v1.Phase {
+	switch phase {
+	case 0:
+		return v1.Phase_PHASE_NOT_STARTED
+	case 1:
+		return v1.Phase_PHASE_REQUEST_HEADERS
+	case 2:
+		return v1.Phase_PHASE_REQUEST_BODY
+	case 3:
+		return v1.Phase_PHASE_REQUEST_TRAILERS
+	case 4:
+		return v1.Phase_PHASE_RESPONSE_HEADERS
+	case 5:
+		return v1.Phase_PHASE_RESPONSE_BODY
+	case 6:
+		return v1.Phase_PHASE_RESPONSE_TRAILERS
+	}
+	return v1.Phase(phase)
+}
+
 // BeginPhase transitions a session into in-flight at a phase and opens a
 // pending decision channel for the human to resolve.
 func (c *SessionController) BeginPhase(id string, phase int32) error {

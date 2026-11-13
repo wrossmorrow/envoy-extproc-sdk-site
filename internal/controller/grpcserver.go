@@ -71,13 +71,14 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 
 		// A phase update means the session is now in flight at that phase; await
 		// the human decision (or phase timeout) and reply over the stream.
-		if err = s.Controller.BeginPhase(update.SessionId, int32(update.Phase)); err != nil {
+		phase := phaseFromExtproc(int32(update.Phase))
+		if err = s.Controller.BeginPhase(update.SessionId, int32(phase)); err != nil {
 			return err
 		}
-		if err = s.Controller.SendUpdate(update.SessionId, &v1.CreateSessionResponse{SessionId: update.SessionId, Phase: update.Phase}); err != nil {
+		if err = s.Controller.SendUpdate(update.SessionId, &v1.CreateSessionResponse{SessionId: update.SessionId, Phase: phase}); err != nil {
 			return err
 		}
-		decision, err := s.Controller.ResolveDecision(ctx, update.SessionId, int32(update.Phase))
+		decision, err := s.Controller.ResolveDecision(ctx, update.SessionId, int32(phase))
 		if err != nil {
 			return err
 		}
