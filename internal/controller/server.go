@@ -168,6 +168,23 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 	}
 }
 
+// SendUpdate sends an update on the session's CreateSession stream to clients
+// with open streams for the session.
+func (c *SessionController) SendUpdate(id string, update *v1.CreateSessionResponse) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return errSessionNotFound
+	}
+	select {
+	case s.Updates <- update:
+		return nil
+	default:
+		return nil
+	}
+}
+
 // BeginPhase transitions a session into in-flight at a phase and opens a
 // pending decision channel for the human to resolve.
 func (c *SessionController) BeginPhase(id string, phase int32) error {

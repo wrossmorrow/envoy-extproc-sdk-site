@@ -74,6 +74,9 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 		if err = s.Controller.BeginPhase(update.SessionId, int32(update.Phase)); err != nil {
 			return err
 		}
+		if err = s.Controller.SendUpdate(update.SessionId, &v1.CreateSessionResponse{SessionId: update.SessionId, Phase: update.Phase}); err != nil {
+			return err
+		}
 		decision, err := s.Controller.ResolveDecision(ctx, update.SessionId, int32(update.Phase))
 		if err != nil {
 			return err
