@@ -30,7 +30,7 @@ const (
 func main() {
 	ctx := context.Background()
 	controllerAddr := envOr("CONTROLLER_ADDR", defaultControllerAddr)
-	envoyAddr := envOr("ENVY_ADDR", defaultEnvoyAddr)
+	envoyAddr := envOr("ENVOY_ADDR", defaultEnvoyAddr)
 	phase := envOr("PHASE", defaultPhase)
 	decisionAction := envOr("DECISION", defaultDecision)
 
