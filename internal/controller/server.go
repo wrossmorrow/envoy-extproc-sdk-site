@@ -125,14 +125,37 @@ func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase
 	if s.Pending == nil || s.Pending.Ch == nil {
 		return errors.New("no pending decision channel")
 	}
-	s.Pending.Ch <- &pendingResolution{decision: decision}
+	s.Pending.Ch <- &pendingResolution{decision: sanitizeCancelDecision(decision)}
 	s.Status = SessionStatusResolved
 	return nil
+}
+
+// sanitizeCancelDecision validates and bounds a human-submitted cancel
+// decision, falling back to a safe status and truncating the body when the
+// submitted status is out of range or the body exceeds MaxCancelBodyBytes.
+func sanitizeCancelDecision(decision *v1.Decision) *v1.Decision {
+	if decision == nil || decision.GetCancel() == nil {
+		return decision
+	}
+	cancel := decision.GetCancel()
+	status := cancel.GetStatus()
+	if status < http.StatusOK || status > 599 {
+		status = http.StatusForbidden
+	}
+	body := cancel.GetBody()
+	if int64(len(body)) > MaxCancelBodyBytes {
+		body = body[:MaxCancelBodyBytes]
+	}
+	return &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: status, Headers: cancel.GetHeaders(), Body: body}}}
 }
 
 // PhaseTimeout is how long ResolveDecision waits for a human decision on a
 // session phase before failing the phase closed with an immediate cancel.
 var PhaseTimeout = 30 * time.Second
+
+// MaxCancelBodyBytes caps the body length accepted on human-submitted cancel
+// decisions through the public SubmitDecision endpoint.
+var MaxCancelBodyBytes int64 = 64 * 1024 // 64 KiB
 
 // phaseDeadline returns the phase decision deadline carried on CreateSession
 // responses, derived from PhaseTimeout.

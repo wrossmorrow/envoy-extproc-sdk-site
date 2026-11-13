@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,5 +260,33 @@ func TestSessionController_SubmitDecision_ResolvesPending(t *testing.T) {
 	res := <-s.Pending.Ch
 	if res.decision == nil || res.decision.GetContinue() == nil {
 		t.Fatalf("pending resolution decision = %+v, want continue", res.decision)
+	}
+}
+
+func TestSessionController_SubmitDecision_SanitizesCancelDecision(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	invalidBody := strings.Repeat("x", int(MaxCancelBodyBytes)+10)
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{
+		Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: 999, Body: invalidBody}},
+	}); err != nil {
+		t.Fatalf("SubmitDecision() error = %v, want nil", err)
+	}
+	res := <-s.Pending.Ch
+	cancel := res.decision.GetCancel()
+	if cancel == nil {
+		t.Fatalf("pending resolution decision = %+v, want cancel", res.decision)
+	}
+	if cancel.GetStatus() != http.StatusForbidden {
+		t.Fatalf("ResolveDecision() cancel status = %d, want %d", cancel.GetStatus(), http.StatusForbidden)
+	}
+	if got := int64(len(cancel.GetBody())); got > MaxCancelBodyBytes {
+		t.Fatalf("ResolveDecision() cancel body length = %d, want <= %d", got, MaxCancelBodyBytes)
 	}
 }
