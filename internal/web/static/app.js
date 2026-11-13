@@ -339,14 +339,17 @@ function setSendRequestEnabled(enabled) {
 }
 
 function bind() {
-  $("new-session").addEventListener("click", function () {
+  $("new-session").addEventListener("click", async function () {
     state.sessionId = null;
     state.phase = PHASE_NOT_STARTED;
     state.status = "idle";
     state.envoyResponse = null;
     state.decisionInFlight = false;
     renderSession();
+    setSendRequestEnabled(false);
     renderPhase();
+    setStatus("idle");
+    await createSession();
   });
   $("send-request").addEventListener("click", sendEnvoyRequest);
   $("btn-continue").addEventListener("click", function () {
