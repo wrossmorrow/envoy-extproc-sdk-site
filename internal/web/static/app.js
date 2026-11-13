@@ -201,8 +201,9 @@ async function startSession() {
     }
   } catch (err) {
     if (abort.signal.aborted) return;
-    setSession("error");
-    log("Session failed: " + err.message, "bad");
+    // A session that was live and then failed has ended; "error" means we never got one.
+    setSession(state.sessionId ? "ended" : "error");
+    log((state.sessionId ? "Session ended: " : "Couldn't start a session: ") + err.message + ".", "bad");
   }
 }
 
@@ -230,6 +231,7 @@ function handleUpdate(update) {
   state.originalBody = null;
   state.deciding = false;
   setStep(phase, "active");
+  setLane(phase, { down: true, proc: "waiting", sub: "waiting on you" });
   if (RESPONSE_PHASES.has(phase)) setStep("upstream", "done");
   log("Paused at " + phaseLabel(phase) + describeSnapshot(state.snapshot) + ".", "warn");
   renderIntercept(true);
@@ -292,6 +294,8 @@ async function decide(action) {
   }
   if (state.phase !== phase) return; // a newer phase already arrived
   setStep(phase, action === "continue" ? "passed" : "rejected");
+  if (action === "continue") setLane(phase, { up: "ok", upText: "↑ continue", proc: "replied", sub: "replied" });
+  else setLane(phase, { up: "bad", upText: "↑ immediate " + decision.cancel.status, proc: "rejected", sub: "rejected" });
   log(summary + ".", action === "continue" ? "ok" : "bad");
   clearPause();
 }
@@ -324,6 +328,7 @@ function startCountdown() {
     node.dataset.urgent = String(secs <= 5);
     if (remaining === 0 && state.phase) {
       setStep(state.phase, "rejected");
+      setLane(state.phase, { up: "bad", upText: "↑ timeout", proc: "rejected", sub: "timed out" });
       log("Timed out at " + phaseLabel(state.phase) + "; the processor fails closed.", "bad");
       clearPause();
     }
@@ -460,12 +465,26 @@ function renderSnapshot() {
   }
   if (snap.status) root.append(el("p", { class: "snapshot-note", text: "Upstream status " + snap.status }));
 
-  const headers = snap.headers || [];
+  // Pseudo-headers first, then by name. The processor's order is currently
+  // random (it ranges over a Go map), so sorting reads better until it isn't.
+  const headers = [...(snap.headers || [])].sort((a, b) => {
+    const pa = a.key.startsWith(":") ? 0 : 1;
+    const pb = b.key.startsWith(":") ? 0 : 1;
+    return pa - pb || a.key.localeCompare(b.key);
+  });
   if (headers.length) {
     root.append(el("p", { class: "field-label", text: "Headers" }));
     const table = el("table", { class: "kv" });
     for (const h of headers) {
-      const row = el("tr", {}, el("td", { text: h.key }), el("td", { text: h.value }));
+      const valueCell = el("td");
+      const valueText = el("div", { text: h.value });
+      if (h.value.length > 120) {
+        valueText.className = "clamped";
+        valueText.title = "Click to expand";
+        valueText.addEventListener("click", () => valueText.classList.toggle("clamped"));
+      }
+      valueCell.append(valueText);
+      const row = el("tr", {}, el("td", { text: h.key }), valueCell);
       const action = el("td", { class: "kv-action" });
       if (!h.key.startsWith(":")) {
         const name = h.key.toLowerCase();
@@ -565,7 +584,34 @@ function showDecisionError(message) {
 
 function resetSteps() {
   state.steps = {};
-  for (const li of $("pipeline").children) delete li.dataset.state;
+  const root = $("pipeline");
+  for (const node of root.querySelectorAll(".step, .proc")) delete node.dataset.state;
+  for (const node of root.querySelectorAll(".proc-sub")) node.textContent = "";
+  for (const node of root.querySelectorAll(".msg")) {
+    delete node.dataset.down;
+    delete node.dataset.up;
+    node.querySelector(".up").textContent = "";
+  }
+}
+
+// setLane updates the ext_proc lane for a phase: the down arrow (Envoy sent
+// the phase's ProcessingRequest), the up arrow (the processor's reply) and the
+// processor box beneath it.
+function setLane(phase, opts) {
+  const root = $("pipeline");
+  const msg = root.querySelector('[data-msg="' + phase + '"]');
+  const proc = root.querySelector('[data-proc="' + phase + '"]');
+  if (msg) {
+    if (opts.down) msg.dataset.down = "true";
+    if (opts.up) {
+      msg.dataset.up = opts.up;
+      msg.querySelector(".up").textContent = opts.upText || "↑";
+    }
+  }
+  if (proc) {
+    if (opts.proc) proc.dataset.state = opts.proc;
+    if (opts.sub !== undefined) proc.querySelector(".proc-sub").textContent = opts.sub;
+  }
 }
 
 function setStep(step, stepState) {
