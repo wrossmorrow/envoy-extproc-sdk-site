@@ -8,8 +8,10 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // SessionStatus reflects the lifecycle state of a demo session.
@@ -28,13 +30,14 @@ type Update = v1.CreateSessionResponse
 
 // Session is a single interactive extproc demo session.
 type Session struct {
-	ID        string
-	Status    SessionStatus
-	Phase     int32
-	Pending   *pendingDecision
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	Updates   chan *Update
+	ID            string
+	Status        SessionStatus
+	Phase         int32
+	Pending       *pendingDecision
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	PhaseDeadline time.Time
+	Updates       chan *Update
 }
 
 type pendingDecision struct {
@@ -43,7 +46,7 @@ type pendingDecision struct {
 }
 
 type pendingResolution struct {
-	Action string // "continue" or "cancel"
+	decision *v1.Decision
 }
 
 // SessionController owns demo sessions and their pending decisions/updates.
@@ -67,11 +70,12 @@ func (c *SessionController) CreateSession() (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := &Session{
-		ID:        newSessionID(),
-		Status:    SessionStatusNew,
-		Updates:   make(chan *Update, 16),
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(30 * time.Second),
+		ID:            newSessionID(),
+		Status:        SessionStatusNew,
+		Updates:       make(chan *Update, 16),
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(30 * time.Second),
+		PhaseDeadline: time.Now().Add(PhaseTimeout),
 	}
 	c.sessions[s.ID] = s
 	return s, nil
@@ -107,7 +111,7 @@ func (c *SessionController) GetUpdates(id string, send func(*v1.CreateSessionRes
 	}
 }
 
-func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, action string) error {
+func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, decision *v1.Decision) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s, ok := c.sessions[id]
@@ -123,15 +127,49 @@ func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase
 	if s.Pending == nil || s.Pending.Ch == nil {
 		return errors.New("no pending decision channel")
 	}
-	res := &pendingResolution{Action: action}
-	s.Pending.Ch <- res
+	s.Pending.Ch <- &pendingResolution{decision: sanitizeCancelDecision(decision)}
 	s.Status = SessionStatusResolved
 	return nil
+}
+
+// sanitizeCancelDecision validates and bounds a human-submitted cancel
+// decision, falling back to a safe status and truncating the body when the
+// submitted status is out of range or the body exceeds MaxCancelBodyBytes.
+func sanitizeCancelDecision(decision *v1.Decision) *v1.Decision {
+	if decision == nil || decision.GetCancel() == nil {
+		return decision
+	}
+	cancel := decision.GetCancel()
+	status := cancel.GetStatus()
+	if status < http.StatusOK || status > 599 {
+		status = http.StatusForbidden
+	}
+	body := cancel.GetBody()
+	if int64(len(body)) > MaxCancelBodyBytes {
+		body = body[:MaxCancelBodyBytes]
+	}
+	return &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: status, Headers: cancel.GetHeaders(), Body: body}}}
 }
 
 // PhaseTimeout is how long ResolveDecision waits for a human decision on a
 // session phase before failing the phase closed with an immediate cancel.
 var PhaseTimeout = 30 * time.Second
+
+// MaxCancelBodyBytes caps the body length accepted on human-submitted cancel
+// decisions through the public SubmitDecision endpoint.
+var MaxCancelBodyBytes int64 = 64 * 1024 // 64 KiB
+
+// PhaseDeadline returns the phase decision deadline recorded for the session
+// identified by id.
+func (c *SessionController) PhaseDeadline(id string) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return time.Time{}
+	}
+	return s.PhaseDeadline
+}
 
 // ResolveDecision resolves the decision for a session phase and returns the
 // decision to send back to the extproc over the Process bidi stream. It awaits
@@ -160,11 +198,11 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 	c.mu.Unlock()
 	select {
 	case res := <-s.Pending.Ch:
-		return decisionResponse(s, phase, res.Action), nil
+		return decisionResponse(s, phase, res.decision), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-time.After(PhaseTimeout):
-		return decisionResponse(s, phase, "cancel"), nil
+	case <-time.After(time.Until(s.PhaseDeadline)):
+		return decisionResponse(s, phase, nil), nil
 	}
 }
 
@@ -219,6 +257,7 @@ func (c *SessionController) BeginPhase(id string, phase int32) error {
 	}
 	s.Status = SessionStatusInFlight
 	s.Phase = phase
+	s.PhaseDeadline = time.Now().Add(PhaseTimeout)
 	if s.Pending == nil {
 		s.Pending = &pendingDecision{Phase: phase}
 	}
@@ -229,13 +268,19 @@ func (c *SessionController) BeginPhase(id string, phase int32) error {
 }
 
 // decisionResponse builds the ProcessResponse decision for a session phase
-// from a human action ("continue" or "cancel").
-func decisionResponse(s *Session, phase int32, action string) *v1.ProcessResponse {
-	decision := &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}
-	if action == "cancel" {
-		decision.Action = &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusGatewayTimeout, Headers: map[string]string{}}}
+// from the human decision. On phase timeout (decision == nil) it fails closed
+// with an immediate cancel decision.
+func decisionResponse(s *Session, phase int32, decision *v1.Decision) *v1.ProcessResponse {
+	resp := &v1.ProcessResponse{SessionId: s.ID, Phase: v1.Phase(phase)}
+	switch {
+	case decision != nil && decision.GetContinue() != nil:
+		resp.Decision = decision
+	case decision != nil && decision.GetCancel() != nil:
+		resp.Decision = decision
+	default:
+		resp.Decision = &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusGatewayTimeout, Headers: map[string]string{}}}}
 	}
-	return &v1.ProcessResponse{SessionId: s.ID, Phase: v1.Phase(phase), Decision: decision}
+	return resp
 }
 
 // DemoControllerHandler implements the Connect service.
@@ -249,15 +294,19 @@ func NewDemoControllerHandler(controller *SessionController) (string, http.Handl
 }
 
 // CreateSession creates a new session and opens a stream of updates. The
-// first Update carries the session id with phase NOT_STARTED; the browser then
-// sends the envoy-bound request carrying that session id and receives phase
-// updates as the session resolves.
+// first Update carries the session id with phase NOT_STARTED and the phase
+// decision deadline; the browser then sends the envoy-bound request carrying
+// that session id and receives phase updates as the session resolves.
 func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest], stream *connect.ServerStream[v1.CreateSessionResponse]) error {
 	s, err := h.Controller.CreateSession()
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&v1.CreateSessionResponse{SessionId: s.ID, Phase: v1.Phase_PHASE_NOT_STARTED}); err != nil {
+	if err := stream.Send(&v1.CreateSessionResponse{
+		SessionId: s.ID,
+		Phase:     v1.Phase_PHASE_NOT_STARTED,
+		Deadline:  timestamppb.New(s.PhaseDeadline),
+	}); err != nil {
 		return err
 	}
 	return h.Controller.GetUpdates(s.ID, func(u *v1.CreateSessionResponse) error {
@@ -265,24 +314,15 @@ func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.
 	})
 }
 
-// decisionAction maps a decision to a human action ("continue" or "cancel").
-func decisionAction(decision *v1.Decision) string {
-	if decision != nil && decision.GetCancel() != nil {
-		return "cancel"
-	}
-	return "continue"
-}
-
 // SubmitDecision submits a human decision for a session at a phase.
 func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error) {
-	action := decisionAction(req.Msg.GetDecision())
-	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), action); err != nil {
+	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), req.Msg.GetDecision()); err != nil {
 		return nil, err
 	}
 	return &connect.Response[v1.SubmitDecisionResponse]{}, nil
 }
 
-// newSessionID returns a new session id.
+// newSessionID returns a new session id, a UUID version 7 (time-ordered) value.
 func newSessionID() string {
-	return "session"
+	return uuid.Must(uuid.NewV7()).String()
 }

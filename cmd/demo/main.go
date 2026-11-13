@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"sort"
+	"strconv"
 
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
@@ -14,7 +17,6 @@ import (
 const (
 	defaultControllerAddr = "controller:9093"
 	sessionIDHeader       = "x-demo-session-id"
-	defaultSessionID      = "session"
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -39,7 +41,7 @@ func newDemoRequestProcessor() *demoRequestProcessor {
 	return &demoRequestProcessor{
 		opts:           &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
 		logger:         slog.Default(),
-		sessionID:      defaultSessionID,
+		sessionID:      "",
 		controllerAddr: addr,
 	}
 }
@@ -71,14 +73,15 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiS
 	return st, nil
 }
 
-// sendPhase sends a phase update to the controller for the session and waits
-// for the controller's decision. Returns the decision (continue/cancel).
-func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessionID string) (*v1.ProcessResponse, error) {
+// sendPhase sends a phase update carrying the phase snapshot to the controller
+// for the session and waits for the controller's decision. Returns the decision
+// (continue/cancel).
+func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessionID string, snapshot *v1.HttpSnapshot) (*v1.ProcessResponse, error) {
 	stream, err := s.controllerStream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err = stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase)}); err != nil {
+	if err = stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase), Snapshot: snapshot}); err != nil {
 		return nil, err
 	}
 	dec, err := stream.Recv()
@@ -98,114 +101,163 @@ func (s *demoRequestProcessor) sessionIDFor(headers extproc.AllHeaders) string {
 	return s.sessionID
 }
 
-// sendPhaseAndDecide sends a phase update and returns the controller decision.
-func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, headers extproc.AllHeaders) (*v1.ProcessResponse, error) {
+const snapshotBodyLimit = 16 * 1024 // cap on bodies reported in phase snapshots
+
+// snapshotHasHeader reports whether the snapshot already carries a header with
+// the given key.
+func snapshotHasHeader(headers []*v1.Header, key string) bool {
+	for _, h := range headers {
+		if h.GetKey() == key {
+			return true
+		}
+	}
+	return false
+}
+
+// snapshotMasked reports whether a snapshot header value should be masked
+// (cookie, set-cookie, authorization).
+func snapshotMasked(name string) bool {
+	switch name {
+	case "cookie", "set-cookie", "authorization":
+		return true
+	}
+	return false
+}
+
+// snapshot builds the HttpSnapshot the demo processor reports to the controller
+// for the phase being processed, from the observed headers and body. Body phases
+// report at most snapshotBodyLimit bytes; longer bodies are truncated and flagged
+// via BodyTruncated. Response phases surface the response status via the
+// ":status" header the data plane sends downstream. Headers are emitted in
+// sorted key order for deterministic snapshots.
+func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) *v1.HttpSnapshot {
+	snap := &v1.HttpSnapshot{}
+	headerList := make([]*v1.Header, 0, len(headers.Headers))
+	for name, values := range headers.Headers {
+		for _, v := range values {
+			if snapshotMasked(name) {
+				headerList = append(headerList, &v1.Header{Key: name, Value: fmt.Sprintf("[redacted %d chars]", len(v))})
+				continue
+			}
+			headerList = append(headerList, &v1.Header{Key: name, Value: v})
+		}
+	}
+	sort.SliceStable(headerList, func(i, j int) bool { return headerList[i].GetKey() < headerList[j].GetKey() })
+	snap.Headers = headerList
+	if status, ok := headers.Get(":status"); ok {
+		if code, err := strconv.Atoi(status); err == nil {
+			snap.Status = int32(code)
+		}
+	}
+	if rc.Method != "" && !snapshotHasHeader(snap.Headers, ":method") {
+		snap.Headers = append(snap.Headers, &v1.Header{Key: ":method", Value: rc.Method})
+	}
+	if rc.Path != "" && !snapshotHasHeader(snap.Headers, ":path") {
+		snap.Headers = append(snap.Headers, &v1.Header{Key: ":path", Value: rc.Path})
+	}
+	if len(body) > snapshotBodyLimit {
+		snap.Body = body[:snapshotBodyLimit]
+		snap.BodyTruncated = true
+	} else {
+		snap.Body = body
+	}
+	return snap
+}
+
+// sendPhaseAndDecide sends a phase update carrying the phase snapshot to the
+// controller for the session and waits for the controller's decision.
+func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
 	sessionID := s.sessionIDFor(headers)
-	return s.sendPhase(ctx, phase, sessionID)
+	snap := s.snapshot(rc, headers, body)
+	return s.sendPhase(ctx, phase, sessionID, snap)
+}
+
+// resolvePhase sends a phase update carrying the phase snapshot to the
+// controller for the session and applies the controller's decision (continue
+// mutations or cancel) to the phase context. It returns any error from sending
+// the phase update or applying the decision.
+func (s *demoRequestProcessor) resolvePhase(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) error {
+	dec, err := s.sendPhaseAndDecide(ctx, phase, rc, headers, body)
+	if err != nil {
+		return err
+	}
+	decision := dec.GetDecision()
+	if decision == nil {
+		return nil
+	}
+	if decision.GetContinue() != nil {
+		continueDecision := decision.GetContinue()
+		if len(continueDecision.GetRemoveHeaders()) > 0 {
+			if err := rc.RemoveHeaders(continueDecision.GetRemoveHeaders()); err != nil {
+				return err
+			}
+		}
+		if len(continueDecision.GetBody()) > 0 {
+			if err := rc.ReplaceBody(continueDecision.GetBody()); err != nil {
+				return err
+			}
+		}
+		for name, value := range continueDecision.GetHeaders() {
+			if err := rc.OverwriteHeader(name, extproc.HeaderValue{RawValue: []byte(value)}); err != nil {
+				return err
+			}
+		}
+		if err := rc.AddHeader("x-demo-processed", extproc.HeaderValue{RawValue: []byte("true")}); err != nil {
+			return err
+		}
+		return rc.ContinueRequest()
+	}
+	if decision.GetCancel() != nil {
+		cancel := decision.GetCancel()
+		return rc.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
+	}
+	return nil
 }
 
 func (s *demoRequestProcessor) ProcessRequestHeaders(ctx *extproc.RequestContext, headers extproc.AllHeaders) error {
-	dec, err := s.sendPhaseAndDecide(context.Background(), extproc.REQUEST_PHASE_REQUEST_HEADERS, headers)
-	if err != nil {
+	if err := s.resolvePhase(context.Background(), extproc.REQUEST_PHASE_REQUEST_HEADERS, ctx, headers, nil); err != nil {
 		s.logger.Error("demo processor failed to send phase update", slog.String("phase", extproc.RequestPhaseToString(extproc.REQUEST_PHASE_REQUEST_HEADERS)), slog.String("error", err.Error()))
 		return err
-	}
-
-	decision := dec.GetDecision()
-	if decision != nil && decision.GetContinue() != nil {
-		if err := ctx.AddHeader("x-demo-processed", extproc.HeaderValue{RawValue: []byte("true")}); err != nil {
-			return err
-		}
-		return ctx.ContinueRequest()
-	}
-	if decision != nil && decision.GetCancel() != nil {
-		cancel := decision.GetCancel()
-		return ctx.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
 }
 
 func (s *demoRequestProcessor) ProcessResponseHeaders(ctx *extproc.RequestContext, headers extproc.AllHeaders) error {
-	dec, err := s.sendPhaseAndDecide(context.Background(), extproc.REQUEST_PHASE_RESPONSE_HEADERS, headers)
-	if err != nil {
+	if err := s.resolvePhase(context.Background(), extproc.REQUEST_PHASE_RESPONSE_HEADERS, ctx, headers, nil); err != nil {
 		s.logger.Error("demo processor failed to send phase update", slog.String("phase", extproc.RequestPhaseToString(extproc.REQUEST_PHASE_RESPONSE_HEADERS)), slog.String("error", err.Error()))
 		return err
-	}
-	decision := dec.GetDecision()
-	if decision != nil && decision.GetContinue() != nil {
-		return ctx.ContinueRequest()
-	}
-	if decision != nil && decision.GetCancel() != nil {
-		cancel := decision.GetCancel()
-		return ctx.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
 }
 
-func (s *demoRequestProcessor) ProcessResponseBody(ctx *extproc.RequestContext, _ []byte) error {
-	dec, err := s.sendPhaseAndDecide(context.Background(), extproc.REQUEST_PHASE_RESPONSE_BODY, extproc.AllHeaders{})
-	if err != nil {
+func (s *demoRequestProcessor) ProcessResponseBody(ctx *extproc.RequestContext, body []byte) error {
+	if err := s.resolvePhase(context.Background(), extproc.REQUEST_PHASE_RESPONSE_BODY, ctx, ctx.AllHeaders, body); err != nil {
 		s.logger.Error("demo processor failed to send phase update", slog.String("phase", extproc.RequestPhaseToString(extproc.REQUEST_PHASE_RESPONSE_BODY)), slog.String("error", err.Error()))
 		return err
-	}
-	decision := dec.GetDecision()
-	if decision != nil && decision.GetContinue() != nil {
-		return ctx.ContinueRequest()
-	}
-	if decision != nil && decision.GetCancel() != nil {
-		cancel := decision.GetCancel()
-		return ctx.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
 }
 
 func (s *demoRequestProcessor) ProcessResponseTrailers(ctx *extproc.RequestContext, trailers extproc.AllHeaders) error {
-	dec, err := s.sendPhaseAndDecide(context.Background(), extproc.REQUEST_PHASE_RESPONSE_TRAILERS, trailers)
-	if err != nil {
+	if err := s.resolvePhase(context.Background(), extproc.REQUEST_PHASE_RESPONSE_TRAILERS, ctx, trailers, nil); err != nil {
 		s.logger.Error("demo processor failed to send phase update", slog.String("phase", extproc.RequestPhaseToString(extproc.REQUEST_PHASE_RESPONSE_TRAILERS)), slog.String("error", err.Error()))
 		return err
-	}
-	decision := dec.GetDecision()
-	if decision != nil && decision.GetContinue() != nil {
-		return ctx.ContinueRequest()
-	}
-	if decision != nil && decision.GetCancel() != nil {
-		cancel := decision.GetCancel()
-		return ctx.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
 }
 
-func (s *demoRequestProcessor) ProcessRequestBody(ctx *extproc.RequestContext, _ []byte) error {
-	dec, err := s.sendPhaseAndDecide(context.Background(), extproc.REQUEST_PHASE_REQUEST_BODY, extproc.AllHeaders{})
-	if err != nil {
+func (s *demoRequestProcessor) ProcessRequestBody(ctx *extproc.RequestContext, body []byte) error {
+	if err := s.resolvePhase(context.Background(), extproc.REQUEST_PHASE_REQUEST_BODY, ctx, ctx.AllHeaders, body); err != nil {
 		s.logger.Error("demo processor failed to send phase update", slog.String("phase", extproc.RequestPhaseToString(extproc.REQUEST_PHASE_REQUEST_BODY)), slog.String("error", err.Error()))
 		return err
-	}
-	decision := dec.GetDecision()
-	if decision != nil && decision.GetContinue() != nil {
-		return ctx.ContinueRequest()
-	}
-	if decision != nil && decision.GetCancel() != nil {
-		cancel := decision.GetCancel()
-		return ctx.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
 }
 
 func (s *demoRequestProcessor) ProcessRequestTrailers(ctx *extproc.RequestContext, trailers extproc.AllHeaders) error {
-	dec, err := s.sendPhaseAndDecide(context.Background(), extproc.REQUEST_PHASE_REQUEST_TRAILERS, trailers)
-	if err != nil {
+	if err := s.resolvePhase(context.Background(), extproc.REQUEST_PHASE_REQUEST_TRAILERS, ctx, trailers, nil); err != nil {
 		s.logger.Error("demo processor failed to send phase update", slog.String("phase", extproc.RequestPhaseToString(extproc.REQUEST_PHASE_REQUEST_TRAILERS)), slog.String("error", err.Error()))
 		return err
-	}
-	decision := dec.GetDecision()
-	if decision != nil && decision.GetContinue() != nil {
-		return ctx.ContinueRequest()
-	}
-	if decision != nil && decision.GetCancel() != nil {
-		cancel := decision.GetCancel()
-		return ctx.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
 }

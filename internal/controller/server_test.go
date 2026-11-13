@@ -3,10 +3,12 @@ package controller
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	connect "connectrpc.com/connect"
+	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 )
 
@@ -28,13 +30,30 @@ func TestSessionController_CreateSession(t *testing.T) {
 	}
 }
 
+func TestSessionController_CreateSession_GeneratesUUIDv7SessionID(t *testing.T) {
+	c := NewSessionController()
+	for i := 0; i < 2; i++ {
+		s, err := c.CreateSession()
+		if err != nil {
+			t.Fatalf("CreateSession() error = %v, want nil", err)
+		}
+		u, err := uuid.Parse(s.ID)
+		if err != nil {
+			t.Fatalf("CreateSession() ID = %q, want valid UUID: %v", s.ID, err)
+		}
+		if u.Version() != 7 {
+			t.Fatalf("CreateSession() ID = %q, want UUID version 7, got version %d", s.ID, u.Version())
+		}
+	}
+}
+
 func TestSessionController_SubmitDecision_RejectsWhenNotInFlight(t *testing.T) {
 	c := NewSessionController()
 	s, err := c.CreateSession()
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v, want nil", err)
 	}
-	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "continue"); err == nil {
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err == nil {
 		t.Fatalf("SubmitDecision() error = nil, want %v", errSessionNotInFlight)
 	}
 }
@@ -47,7 +66,7 @@ func TestSessionController_SubmitDecision_RejectsPhaseMismatch(t *testing.T) {
 	}
 	s.Status = SessionStatusInFlight
 	s.Phase = int32(v1.Phase_PHASE_REQUEST_HEADERS)
-	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_RESPONSE_BODY), "continue"); err == nil {
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_RESPONSE_BODY), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err == nil {
 		t.Fatalf("SubmitDecision() error = nil, want %v", errPhaseMismatch)
 	}
 }
@@ -99,7 +118,7 @@ func TestSessionController_ResolveDecision_AwaitsHumanDecision(t *testing.T) {
 		decisionCh <- decision
 		decisionErrCh <- decisionErr
 	}()
-	s.Pending.Ch <- &pendingResolution{Action: "continue"}
+	s.Pending.Ch <- &pendingResolution{decision: &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}}
 	dec := <-decisionCh
 	decisionErr := <-decisionErrCh
 	if decisionErr != nil {
@@ -116,12 +135,12 @@ func TestSessionController_ResolveDecision_ReturnsCancelOnPhaseTimeout(t *testin
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v, want nil", err)
 	}
-	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
-		t.Fatalf("BeginPhase() error = %v, want nil", err)
-	}
 	oldTimeout := PhaseTimeout
 	PhaseTimeout = 50 * time.Millisecond
 	defer func() { PhaseTimeout = oldTimeout }()
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
 	dec, err := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS))
 	if err != nil {
 		t.Fatalf("ResolveDecision() error = %v, want nil", err)
@@ -171,8 +190,8 @@ func TestDemoControllerHandler_SubmitDecision_MapsContinue(t *testing.T) {
 		t.Fatalf("SubmitDecision() Status = %v, want %v", s.Status, SessionStatusResolved)
 	}
 	res := <-s.Pending.Ch
-	if res.Action != "continue" {
-		t.Fatalf("SubmitDecision() resolved action = %q, want %q", res.Action, "continue")
+	if res.decision == nil || res.decision.GetContinue() == nil {
+		t.Fatalf("SubmitDecision() resolved decision = %+v, want continue", res.decision)
 	}
 }
 
@@ -201,8 +220,11 @@ func TestDemoControllerHandler_SubmitDecision_MapsCancel(t *testing.T) {
 		t.Fatalf("SubmitDecision() Status = %v, want %v", s.Status, SessionStatusResolved)
 	}
 	res := <-s.Pending.Ch
-	if res.Action != "cancel" {
-		t.Fatalf("SubmitDecision() resolved action = %q, want %q", res.Action, "cancel")
+	if res.decision == nil || res.decision.GetCancel() == nil {
+		t.Fatalf("SubmitDecision() resolved decision = %+v, want cancel", res.decision)
+	}
+	if res.decision.GetCancel().GetStatus() != 403 {
+		t.Fatalf("SubmitDecision() resolved cancel status = %d, want 403", res.decision.GetCancel().GetStatus())
 	}
 }
 
@@ -229,14 +251,42 @@ func TestSessionController_SubmitDecision_ResolvesPending(t *testing.T) {
 	s.Status = SessionStatusInFlight
 	s.Phase = int32(v1.Phase_PHASE_REQUEST_HEADERS)
 	s.Pending = &pendingDecision{Phase: int32(v1.Phase_PHASE_REQUEST_HEADERS), Ch: make(chan *pendingResolution, 1)}
-	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "continue"); err != nil {
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err != nil {
 		t.Fatalf("SubmitDecision() error = %v, want nil", err)
 	}
 	if s.Status != SessionStatusResolved {
 		t.Fatalf("SubmitDecision() resolved status = %v, want %v", s.Status, SessionStatusResolved)
 	}
 	res := <-s.Pending.Ch
-	if res.Action != "continue" {
-		t.Fatalf("pending resolution action = %q, want %q", res.Action, "continue")
+	if res.decision == nil || res.decision.GetContinue() == nil {
+		t.Fatalf("pending resolution decision = %+v, want continue", res.decision)
+	}
+}
+
+func TestSessionController_SubmitDecision_SanitizesCancelDecision(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	invalidBody := strings.Repeat("x", int(MaxCancelBodyBytes)+10)
+	if err := c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{
+		Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: 999, Body: invalidBody}},
+	}); err != nil {
+		t.Fatalf("SubmitDecision() error = %v, want nil", err)
+	}
+	res := <-s.Pending.Ch
+	cancel := res.decision.GetCancel()
+	if cancel == nil {
+		t.Fatalf("pending resolution decision = %+v, want cancel", res.decision)
+	}
+	if cancel.GetStatus() != http.StatusForbidden {
+		t.Fatalf("ResolveDecision() cancel status = %d, want %d", cancel.GetStatus(), http.StatusForbidden)
+	}
+	if got := int64(len(cancel.GetBody())); got > MaxCancelBodyBytes {
+		t.Fatalf("ResolveDecision() cancel body length = %d, want <= %d", got, MaxCancelBodyBytes)
 	}
 }
