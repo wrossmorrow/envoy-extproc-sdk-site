@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -132,7 +133,7 @@ func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, headers extp
 	for name, values := range headers.Headers {
 		for _, v := range values {
 			if snapshotMasked(name) {
-				snap.Headers = append(snap.Headers, &v1.Header{Key: name, Value: strconv.Itoa(len(v))})
+				snap.Headers = append(snap.Headers, &v1.Header{Key: name, Value: fmt.Sprintf("[redacted %d chars]", len(v))})
 				continue
 			}
 			snap.Headers = append(snap.Headers, &v1.Header{Key: name, Value: v})
