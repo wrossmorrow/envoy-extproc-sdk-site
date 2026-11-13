@@ -198,6 +198,10 @@ pre {
 .kv { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.78rem; margin-bottom: 0.5rem; }
 .kv td { padding: 0.2rem 0.4rem; border-top: 1px solid var(--border); vertical-align: top; word-break: break-all; }
 .kv td:first-child { color: var(--text-2); white-space: nowrap; width: 1%; }
+.kv td.kv-action { width: 1%; text-align: right; padding: 0 0 0 0.25rem; }
+.kv tr[data-removed="true"] td:not(.kv-action) { text-decoration: line-through; color: var(--bad); opacity: 0.75; }
+#body-editor { min-height: 6rem; }
+#body-editor[readonly] { opacity: 0.8; }
 
 .group { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.75rem 0.65rem; margin: 0.5rem 0 0; }
 .group legend { font-size: 0.8rem; font-weight: 600; color: var(--text-2); padding: 0 0.25rem; }

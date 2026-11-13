@@ -40,6 +40,7 @@ const PHASE_LABELS = {
 };
 const REQUEST_PHASES = new Set(["PHASE_REQUEST_HEADERS", "PHASE_REQUEST_BODY", "PHASE_REQUEST_TRAILERS"]);
 const RESPONSE_PHASES = new Set(["PHASE_RESPONSE_HEADERS", "PHASE_RESPONSE_BODY", "PHASE_RESPONSE_TRAILERS"]);
+const BODY_PHASES = new Set(["PHASE_REQUEST_BODY", "PHASE_RESPONSE_BODY"]);
 
 const PRESETS = [
   {
@@ -69,6 +70,8 @@ const state = {
   phaseStartedAt: 0,
   deadline: 0,
   snapshot: null,
+  removeHeaders: new Set(), // header names marked for removal at this phase
+  originalBody: null, // decoded snapshot body, to detect edits
   deciding: false,
   steps: {}, // pipeline step -> state
 };
@@ -223,6 +226,8 @@ function handleUpdate(update) {
   state.phaseStartedAt = Date.now();
   state.deadline = update.deadline ? Date.parse(update.deadline) : Date.now() + FALLBACK_PHASE_TIMEOUT_MS;
   state.snapshot = update.snapshot || null;
+  state.removeHeaders = new Set();
+  state.originalBody = null;
   state.deciding = false;
   setStep(phase, "active");
   if (RESPONSE_PHASES.has(phase)) setStep("upstream", "done");
@@ -262,9 +267,16 @@ async function decide(action) {
   let summary;
   if (action === "continue") {
     const headers = collectSetHeaders();
-    decision = { continue: { headers } };
-    const names = Object.keys(headers);
-    summary = "Continued " + phaseLabel(phase) + (names.length ? " · set " + names.join(", ") : "");
+    const removeHeaders = [...state.removeHeaders];
+    const cont = { headers, removeHeaders };
+    const editedBody = editedBodyText();
+    if (editedBody !== null) cont.body = encodeBase64(editedBody);
+    decision = { continue: cont };
+    const changes = [];
+    if (Object.keys(headers).length) changes.push("set " + Object.keys(headers).join(", "));
+    if (removeHeaders.length) changes.push("removed " + removeHeaders.join(", "));
+    if (editedBody !== null) changes.push("replaced body");
+    summary = "Continued " + phaseLabel(phase) + (changes.length ? " · " + changes.join("; ") : "");
   } else {
     const status = parseInt($("cancel-status").value, 10);
     decision = { cancel: { status, body: $("cancel-body").value, headers: {} } };
@@ -284,9 +296,18 @@ async function decide(action) {
   clearPause();
 }
 
+// editedBodyText returns the edited body text, or null if unchanged or not editable.
+function editedBodyText() {
+  const editor = $("body-editor");
+  if (!editor || editor.readOnly || state.originalBody === null) return null;
+  return editor.value === state.originalBody ? null : editor.value;
+}
+
 function clearPause() {
   state.phase = null;
   state.snapshot = null;
+  state.removeHeaders = new Set();
+  state.originalBody = null;
   state.deciding = false;
   stopCountdown();
   renderIntercept(false);
@@ -438,14 +459,54 @@ function renderSnapshot() {
     return;
   }
   if (snap.status) root.append(el("p", { class: "snapshot-note", text: "Upstream status " + snap.status }));
-  if (snap.headers && snap.headers.length) {
+
+  const headers = snap.headers || [];
+  if (headers.length) {
+    root.append(el("p", { class: "field-label", text: "Headers" }));
     const table = el("table", { class: "kv" });
-    for (const h of snap.headers) {
-      table.append(el("tr", {}, el("td", { text: h.key }), el("td", { text: h.value })));
+    for (const h of headers) {
+      const row = el("tr", {}, el("td", { text: h.key }), el("td", { text: h.value }));
+      const action = el("td", { class: "kv-action" });
+      if (!h.key.startsWith(":")) {
+        const name = h.key.toLowerCase();
+        const btn = el("button", { type: "button", class: "ghost small" });
+        const sync = () => {
+          const removed = state.removeHeaders.has(name);
+          row.dataset.removed = String(removed);
+          btn.textContent = removed ? "Keep" : "Remove";
+          btn.setAttribute("aria-label", (removed ? "Keep " : "Remove ") + h.key);
+        };
+        btn.addEventListener("click", () => {
+          if (state.removeHeaders.has(name)) state.removeHeaders.delete(name);
+          else state.removeHeaders.add(name);
+          // keep every row with the same name in sync
+          for (const other of table.querySelectorAll("tr")) other.dispatchEvent(new Event("sync"));
+        });
+        row.addEventListener("sync", sync);
+        sync();
+        action.append(btn);
+      }
+      row.append(action);
+      table.append(row);
     }
     root.append(table);
+  } else if (!BODY_PHASES.has(state.phase)) {
+    root.append(el("p", { class: "snapshot-note", text: "No headers reported at this phase." }));
   }
-  if (snap.body) root.append(el("pre", { text: prettyBody(decodeBase64(snap.body)) }));
+
+  if (BODY_PHASES.has(state.phase)) {
+    const text = snap.body ? decodeBase64(snap.body) : "";
+    state.originalBody = text;
+    root.append(el("label", { class: "field-label", for: "body-editor", text: "Body" }));
+    const editor = el("textarea", { id: "body-editor", rows: "6", spellcheck: "false" });
+    editor.value = text;
+    if (snap.bodyTruncated) {
+      editor.readOnly = true;
+      root.append(editor, el("p", { class: "snapshot-note", text: "Truncated for display, so it can't be edited here." }));
+    } else {
+      root.append(editor, el("p", { class: "snapshot-note", text: "Edit to replace the body when you continue." }));
+    }
+  }
 }
 
 function renderResponse(result, elapsed) {
@@ -475,6 +536,15 @@ function decodeBase64(b64) {
   } catch (err) {
     return b64;
   }
+}
+
+function encodeBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }
 
 function base64Length(b64) {
