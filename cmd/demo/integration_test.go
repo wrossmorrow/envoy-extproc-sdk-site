@@ -336,11 +336,11 @@ func TestFlow_FullContinueAcrossPhases(t *testing.T) {
 	// phase update, the controller relays it on the create-session stream, the
 	// human continues, and the demo extproc applies the continue decision and
 	// replies over the processing response stream.
-	if err := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, phaseKindRequestHeaders); err != nil {
-		t.Fatalf("integration: send phase update (request headers): %v", err)
+	if sendErr := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, phaseKindRequestHeaders); sendErr != nil {
+		t.Fatalf("integration: send phase update (request headers): %v", sendErr)
 	}
-	if err := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, "continue"); err != nil {
-		t.Fatalf("integration: submit human decision (continue): %v", err)
+	if submitErr := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, "continue"); submitErr != nil {
+		t.Fatalf("integration: submit human decision (continue): %v", submitErr)
 	}
 	resp, err := e.recvDecision(ctx)
 	if err != nil {
@@ -351,11 +351,11 @@ func TestFlow_FullContinueAcrossPhases(t *testing.T) {
 	// Phase 2: envoy-bound response-headers phase. After the human continued,
 	// the demo extproc waits for the next phase update, now for the response
 	// headers phase of the same session.
-	if err := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_RESPONSE_HEADERS, phaseKindResponseHeaders); err != nil {
-		t.Fatalf("integration: send phase update (response headers): %v", err)
+	if sendErr := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_RESPONSE_HEADERS, phaseKindResponseHeaders); sendErr != nil {
+		t.Fatalf("integration: send phase update (response headers): %v", sendErr)
 	}
-	if err := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_RESPONSE_HEADERS, "continue"); err != nil {
-		t.Fatalf("integration: submit human decision (continue): %v", err)
+	if submitErr := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_RESPONSE_HEADERS, "continue"); submitErr != nil {
+		t.Fatalf("integration: submit human decision (continue): %v", submitErr)
 	}
 	resp, err = e.recvDecision(ctx)
 	if err != nil {
@@ -378,11 +378,11 @@ func TestFlow_CancelDecisionShortCircuits(t *testing.T) {
 	}
 	defer func() { _ = stream.Close() }()
 
-	if err := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, phaseKindRequestHeaders); err != nil {
-		t.Fatalf("integration: send phase update: %v", err)
+	if sendErr := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, phaseKindRequestHeaders); sendErr != nil {
+		t.Fatalf("integration: send phase update: %v", sendErr)
 	}
-	if err := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, "cancel"); err != nil {
-		t.Fatalf("integration: submit human decision (cancel): %v", err)
+	if submitErr := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, "cancel"); submitErr != nil {
+		t.Fatalf("integration: submit human decision (cancel): %v", submitErr)
 	}
 	resp, err := e.recvDecision(ctx)
 	if err != nil {
@@ -407,8 +407,8 @@ func TestFlow_PhaseTimeoutFailsClosed(t *testing.T) {
 	}
 	defer func() { _ = stream.Close() }()
 
-	if err := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, phaseKindRequestHeaders); err != nil {
-		t.Fatalf("integration: send phase update: %v", err)
+	if sendErr := e.sendPhaseUpdate(ctx, stream, sessionID, v1.Phase_PHASE_REQUEST_HEADERS, phaseKindRequestHeaders); sendErr != nil {
+		t.Fatalf("integration: send phase update: %v", sendErr)
 	}
 	resp, err := e.recvDecision(ctx)
 	if err != nil {
