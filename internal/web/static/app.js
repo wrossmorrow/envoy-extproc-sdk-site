@@ -274,6 +274,8 @@ async function createSession() {
 
 function handleUpdate(message) {
   state.phase = message.phase;
+  // A new phase update means a new phase is awaiting its own decision.
+  state.decisionInFlight = false;
   if (message.phase === PHASE_NOT_STARTED) {
     setStatus("awaiting_request");
   } else if (IN_FLIGHT_PHASES.has(message.phase)) {
