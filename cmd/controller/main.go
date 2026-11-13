@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
 	controller "github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
+	"github.com/wrossmorrow/envoy-extproc-sdk-site/internal/web/static"
 )
 
 const (
@@ -25,15 +27,42 @@ const (
 	grpcAddr   = "0.0.0.0:9093"
 )
 
-func main() {
-	sessCtrl := controller.NewSessionController()
-	handler := &controller.DemoControllerHandler{Controller: sessCtrl}
-	path, h := v1connect.NewDemoControllerServiceHandler(handler)
+// envoyAddr is the upstream Envoy instance relaying envoy-bound demo
+// requests proxied through the demo web frontend.
+var envoyAddr = envOr("ENVOY_ADDR", "localhost:8081")
+
+// envOr returns the value of the environment variable named key, or fallback if unset.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// newMux builds the http.Handler for the demo controller service: the
+// human-facing Connect API, the interactive demo static frontend, and an envoy
+// reverse proxy for envoy-bound demo requests. All are served same-origin.
+func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
-	mux.Handle(path, h)
+	controllerPath, controllerHandler := v1connect.NewDemoControllerServiceHandler(&controller.DemoControllerHandler{Controller: sessCtrl})
+	mux.Handle(controllerPath, controllerHandler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.Handle("/envoy/", &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = "http"
+			req.URL.Host = envoyAddr
+			req.URL.Path = "/"
+		},
+	})
+	mux.Handle("/", http.FileServer(http.FS(static.FS)))
+	return mux, controllerPath
+}
+
+func main() {
+	sessCtrl := controller.NewSessionController()
+	mux, _ := newMux(sessCtrl)
 	srv := &http.Server{Addr: listenAddr, Handler: mux}
 
 	// gRPC server hosting the demo controller (human-facing) and demo processor
