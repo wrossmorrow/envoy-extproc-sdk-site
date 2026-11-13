@@ -22,7 +22,7 @@ import (
 
 const (
 	defaultControllerAddr = "localhost:9093"
-	defaultEnvoyAddr      = "http://localhost:8080"
+	defaultEnvoyAddr      = "http://localhost:8081"
 	defaultPhase          = "PHASE_REQUEST_HEADERS"
 	defaultDecision       = "continue"
 )
