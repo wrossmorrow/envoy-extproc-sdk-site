@@ -79,6 +79,9 @@ function phaseText() {
   if (state.status === "complete") {
     return "Phase flow complete. See the envoy response below.";
   }
+  if (state.status === "envoy_in_flight") {
+    return "Sending envoy-bound request… awaiting phase decisions.";
+  }
   if (state.phase === PHASE_NOT_STARTED) {
     return "Session created. Send an envoy-bound request to start the phase flow.";
   }
@@ -247,22 +250,20 @@ async function createSession() {
   const stream = new ConnectStream(res);
   state.stream = stream;
   let next = stream.next();
-  let first = true;
   for (;;) {
     const { done, message } = await next;
     if (done) {
       return;
     }
     next = stream.next();
-    if (first) {
-      first = false;
+    if (!state.sessionId) {
+      // First update: session created with phase PHASE_NOT_STARTED.
       state.sessionId = message.sessionId;
       state.phase = message.phase;
       renderSession();
       setSendRequestEnabled(true);
       renderPhase();
       setStatus("awaiting_request");
-      return;
     }
     handleUpdate(message);
   }
