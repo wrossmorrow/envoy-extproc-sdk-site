@@ -8,7 +8,7 @@
 set -euo pipefail
 
 CONTROLLER="${CONTROLLER:-http://localhost:9092}"
-ENVY="${ENVY:-http://localhost:8080}"
+ENVOY="${ENVOY:-http://localhost:8080}"
 SESSION_HEADER="${SESSION_HEADER:-x-demo-session-id}"
 PHASE="${PHASE:-PHASE_REQUEST_HEADERS}"
 DECISION="${DECISION:-}"
@@ -23,6 +23,7 @@ create_session() {
       SESSION_ID="$session_id"
       return 0
     fi
+    echo "failed to create session (attempt ${_i})" >&2
     sleep 1
   done
   echo "failed to create session" >&2
@@ -34,7 +35,7 @@ create_session
 
 echo "session id: $SESSION_ID"
 
-RESP="$(curl -s -X POST "$ENVY/" \
+RESP="$(curl -s -X POST "$ENVOY/" \
   -H 'content-type: application/json' \
   -H "$SESSION_HEADER: $SESSION_ID" \
   -d '{"hello":"world"}')" || true
