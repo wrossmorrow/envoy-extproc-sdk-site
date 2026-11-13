@@ -68,12 +68,20 @@ func main() {
 
 	// Send the envoy-bound phase request carrying the session id; this drives
 	// the demo extproc which puts the session in flight and waits for a decision.
-	if err := sendEnvoyBound(ctx, envoyAddr, sessionID); err != nil {
+	// The call only returns once the demo has applied the decision, so run it
+	// concurrently with the human decision submission.
+	envoyDone := make(chan error, 1)
+	go func() {
+		envoyDone <- sendEnvoyBound(ctx, envoyAddr, sessionID)
+	}()
+
+	// Submit the human decision (concurrently with the create-session stream and
+	// the envoy-bound phase request).
+	if err := submitDecision(ctx, client, sessionID, sessionPhase, decisionAction); err != nil {
 		fatal(err)
 	}
 
-	// Submit the human decision (concurrently with the create-session stream).
-	if err := submitDecision(ctx, client, sessionID, sessionPhase, decisionAction); err != nil {
+	if err := <-envoyDone; err != nil {
 		fatal(err)
 	}
 
