@@ -18,7 +18,7 @@ create_session() {
   for _i in $(seq 1 30); do
     resp="$(curl -s -X POST "$CONTROLLER/controller.v1.DemoControllerService/CreateSession" \
       -H 'content-type: application/connect+json' -d '{}' || true)"
-    session_id="$(printf '%s' "$resp" | grep -o '"session_id":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')" || true
+    session_id="$(printf '%s' "$resp" | grep -o '"sessionId":"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')" || true
     if [[ -n "$session_id" ]]; then
       SESSION_ID="$session_id"
       return 0
@@ -42,7 +42,7 @@ RESP="$(curl -s -X POST "$ENVOY/" \
 echo "envoy-bound response: $RESP"
 
 if [[ -z "$DECISION" ]]; then
-  DECISION="{\"session_id\":\"$SESSION_ID\",\"phase\":\"$PHASE\",\"decision\":{\"continue\":{}}}"
+  DECISION="{\"sessionId\":\"$SESSION_ID\",\"phase\":\"$PHASE\",\"decision\":{\"continue\":{}}}"
 fi
 curl -s -X POST "$CONTROLLER/controller.v1.DemoControllerService/SubmitDecision" \
   -H 'content-type: application/connect+json' \
