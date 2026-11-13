@@ -292,8 +292,8 @@ async function submitDecision(action) {
   setDecisionsEnabled(false);
   const decision =
     action === "cancel"
-      ? { action: { cancel: { status: 503, body: "", headers: {} } } }
-      : { action: { continue: { headers: {} } } };
+      ? { cancel: { status: 503, body: "", headers: {} } }
+      : { continue: { headers: {} } };
   try {
     const res = await fetchConnect(
       location.origin + CONTROLLER_BASE + "/SubmitDecision",
