@@ -85,4 +85,7 @@ func TestHandlerMountsControllerConnect(t *testing.T) {
 	if got := msg.GetPhase(); got.String() != "PHASE_NOT_STARTED" {
 		t.Fatalf("create session first update phase = %v, want PHASE_NOT_STARTED", got)
 	}
+	if msg.GetDeadline() == nil {
+		t.Fatalf("create session first update deadline = nil, want phase deadline")
+	}
 }

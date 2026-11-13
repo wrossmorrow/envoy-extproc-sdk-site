@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // SessionStatus reflects the lifecycle state of a demo session.
@@ -134,6 +135,12 @@ func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase
 // session phase before failing the phase closed with an immediate cancel.
 var PhaseTimeout = 30 * time.Second
 
+// phaseDeadline returns the phase decision deadline carried on CreateSession
+// responses, derived from PhaseTimeout.
+func phaseDeadline() *timestamppb.Timestamp {
+	return timestamppb.New(time.Now().Add(PhaseTimeout))
+}
+
 // ResolveDecision resolves the decision for a session phase and returns the
 // decision to send back to the extproc over the Process bidi stream. It awaits
 // the pending human decision (see SubmitDecision) and, on phase timeout, fails
@@ -250,15 +257,19 @@ func NewDemoControllerHandler(controller *SessionController) (string, http.Handl
 }
 
 // CreateSession creates a new session and opens a stream of updates. The
-// first Update carries the session id with phase NOT_STARTED; the browser then
-// sends the envoy-bound request carrying that session id and receives phase
-// updates as the session resolves.
+// first Update carries the session id with phase NOT_STARTED and the phase
+// decision deadline; the browser then sends the envoy-bound request carrying
+// that session id and receives phase updates as the session resolves.
 func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest], stream *connect.ServerStream[v1.CreateSessionResponse]) error {
 	s, err := h.Controller.CreateSession()
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&v1.CreateSessionResponse{SessionId: s.ID, Phase: v1.Phase_PHASE_NOT_STARTED}); err != nil {
+	if err := stream.Send(&v1.CreateSessionResponse{
+		SessionId: s.ID,
+		Phase:     v1.Phase_PHASE_NOT_STARTED,
+		Deadline:  phaseDeadline(),
+	}); err != nil {
 		return err
 	}
 	return h.Controller.GetUpdates(s.ID, func(u *v1.CreateSessionResponse) error {

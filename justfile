@@ -15,8 +15,7 @@ tidy:
 
 # generate code for protobufs
 gen:
-    docker run --rm -v "${PWD}":/work -w /work --entrypoint buf \
-        ghcr.io/wrossmorrow/flint-pi-golang generate
+    buf generate
 
 # format code
 format:

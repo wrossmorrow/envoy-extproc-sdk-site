@@ -18,13 +18,18 @@ type DemoControllerGRPCServer struct {
 }
 
 // CreateSession opens a server-streaming RPC that sends session updates. The
-// first CreateSessionResponse carries the session id with phase PHASE_NOT_STARTED.
+// first CreateSessionResponse carries the session id with phase PHASE_NOT_STARTED
+// and the phase decision deadline.
 func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, stream grpc.ServerStreamingServer[v1.CreateSessionResponse]) error {
 	sess, err := s.Controller.CreateSession()
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&v1.CreateSessionResponse{SessionId: sess.ID, Phase: v1.Phase_PHASE_NOT_STARTED}); err != nil {
+	if err := stream.Send(&v1.CreateSessionResponse{
+		SessionId: sess.ID,
+		Phase:     v1.Phase_PHASE_NOT_STARTED,
+		Deadline:  phaseDeadline(),
+	}); err != nil {
 		return err
 	}
 	return s.Controller.GetUpdates(sess.ID, func(u *v1.CreateSessionResponse) error {
@@ -75,7 +80,12 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 		if err = s.Controller.BeginPhase(update.SessionId, int32(phase)); err != nil {
 			return err
 		}
-		if err = s.Controller.SendUpdate(update.SessionId, &v1.CreateSessionResponse{SessionId: update.SessionId, Phase: phase}); err != nil {
+		if err = s.Controller.SendUpdate(update.SessionId, &v1.CreateSessionResponse{
+			SessionId: update.SessionId,
+			Phase:     phase,
+			Snapshot:  update.Snapshot,
+			Deadline:  phaseDeadline(),
+		}); err != nil {
 			return err
 		}
 		decision, err := s.Controller.ResolveDecision(ctx, update.SessionId, int32(phase))

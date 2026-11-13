@@ -9,6 +9,7 @@ package controllerv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -125,6 +126,8 @@ type CreateSessionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Phase         Phase                  `protobuf:"varint,2,opt,name=phase,proto3,enum=controller.v1.Phase" json:"phase,omitempty"`
+	Snapshot      *HttpSnapshot          `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Deadline      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,6 +174,20 @@ func (x *CreateSessionResponse) GetPhase() Phase {
 		return x.Phase
 	}
 	return Phase_PHASE_UNSPECIFIED
+}
+
+func (x *CreateSessionResponse) GetSnapshot() *HttpSnapshot {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
+func (x *CreateSessionResponse) GetDeadline() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Deadline
+	}
+	return nil
 }
 
 type SubmitDecisionRequest struct {
@@ -273,6 +290,7 @@ type ProcessRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Phase         Phase                  `protobuf:"varint,2,opt,name=phase,proto3,enum=controller.v1.Phase" json:"phase,omitempty"`
+	Snapshot      *HttpSnapshot          `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -319,6 +337,13 @@ func (x *ProcessRequest) GetPhase() Phase {
 		return x.Phase
 	}
 	return Phase_PHASE_UNSPECIFIED
+}
+
+func (x *ProcessRequest) GetSnapshot() *HttpSnapshot {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
 }
 
 type ProcessResponse struct {
@@ -467,6 +492,8 @@ type Continue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// header/body mutations to apply when continuing.
 	Headers       map[string]string `protobuf:"bytes,1,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	RemoveHeaders []string          `protobuf:"bytes,2,rep,name=remove_headers,json=removeHeaders,proto3" json:"remove_headers,omitempty"`
+	Body          []byte            `protobuf:"bytes,3,opt,name=body,proto3,oneof" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -508,6 +535,145 @@ func (x *Continue) GetHeaders() map[string]string {
 	return nil
 }
 
+func (x *Continue) GetRemoveHeaders() []string {
+	if x != nil {
+		return x.RemoveHeaders
+	}
+	return nil
+}
+
+func (x *Continue) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+type Header struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Header) Reset() {
+	*x = Header{}
+	mi := &file_controller_v1_controller_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Header) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Header) ProtoMessage() {}
+
+func (x *Header) ProtoReflect() protoreflect.Message {
+	mi := &file_controller_v1_controller_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Header.ProtoReflect.Descriptor instead.
+func (*Header) Descriptor() ([]byte, []int) {
+	return file_controller_v1_controller_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *Header) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *Header) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+type HttpSnapshot struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Headers observed at this phase; keeps order and duplicates; includes
+	// :method, :path and friends. Empty for phases that carry no headers.
+	Headers []*Header `protobuf:"bytes,1,rep,name=headers,proto3" json:"headers,omitempty"`
+	// Body observed at this phase; body phases only; capped (e.g. 16 KiB).
+	Body []byte `protobuf:"bytes,2,opt,name=body,proto3" json:"body,omitempty"`
+	// True when the body was truncated at the cap above.
+	BodyTruncated bool `protobuf:"varint,3,opt,name=body_truncated,json=bodyTruncated,proto3" json:"body_truncated,omitempty"`
+	// Response status observed at this phase; response phases only.
+	Status        int32 `protobuf:"varint,4,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HttpSnapshot) Reset() {
+	*x = HttpSnapshot{}
+	mi := &file_controller_v1_controller_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HttpSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HttpSnapshot) ProtoMessage() {}
+
+func (x *HttpSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_controller_v1_controller_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HttpSnapshot.ProtoReflect.Descriptor instead.
+func (*HttpSnapshot) Descriptor() ([]byte, []int) {
+	return file_controller_v1_controller_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *HttpSnapshot) GetHeaders() []*Header {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *HttpSnapshot) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *HttpSnapshot) GetBodyTruncated() bool {
+	if x != nil {
+		return x.BodyTruncated
+	}
+	return false
+}
+
+func (x *HttpSnapshot) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
 type Cancel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        int32                  `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
@@ -519,7 +685,7 @@ type Cancel struct {
 
 func (x *Cancel) Reset() {
 	*x = Cancel{}
-	mi := &file_controller_v1_controller_proto_msgTypes[8]
+	mi := &file_controller_v1_controller_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -531,7 +697,7 @@ func (x *Cancel) String() string {
 func (*Cancel) ProtoMessage() {}
 
 func (x *Cancel) ProtoReflect() protoreflect.Message {
-	mi := &file_controller_v1_controller_proto_msgTypes[8]
+	mi := &file_controller_v1_controller_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -544,7 +710,7 @@ func (x *Cancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cancel.ProtoReflect.Descriptor instead.
 func (*Cancel) Descriptor() ([]byte, []int) {
-	return file_controller_v1_controller_proto_rawDescGZIP(), []int{8}
+	return file_controller_v1_controller_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Cancel) GetStatus() int32 {
@@ -572,22 +738,25 @@ var File_controller_v1_controller_proto protoreflect.FileDescriptor
 
 const file_controller_v1_controller_proto_rawDesc = "" +
 	"\n" +
-	"\x1econtroller/v1/controller.proto\x12\rcontroller.v1\"\x16\n" +
-	"\x14CreateSessionRequest\"b\n" +
+	"\x1econtroller/v1/controller.proto\x12\rcontroller.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x16\n" +
+	"\x14CreateSessionRequest\"\xd3\x01\n" +
 	"\x15CreateSessionResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12*\n" +
-	"\x05phase\x18\x02 \x01(\x0e2\x14.controller.v1.PhaseR\x05phase\"\x97\x01\n" +
+	"\x05phase\x18\x02 \x01(\x0e2\x14.controller.v1.PhaseR\x05phase\x127\n" +
+	"\bsnapshot\x18\x03 \x01(\v2\x1b.controller.v1.HttpSnapshotR\bsnapshot\x126\n" +
+	"\bdeadline\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\"\x97\x01\n" +
 	"\x15SubmitDecisionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12*\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x14.controller.v1.PhaseR\x05phase\x123\n" +
 	"\bdecision\x18\x03 \x01(\v2\x17.controller.v1.DecisionR\bdecision\"\x18\n" +
-	"\x16SubmitDecisionResponse\"[\n" +
+	"\x16SubmitDecisionResponse\"\x94\x01\n" +
 	"\x0eProcessRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12*\n" +
-	"\x05phase\x18\x02 \x01(\x0e2\x14.controller.v1.PhaseR\x05phase\"\x91\x01\n" +
+	"\x05phase\x18\x02 \x01(\x0e2\x14.controller.v1.PhaseR\x05phase\x127\n" +
+	"\bsnapshot\x18\x03 \x01(\v2\x1b.controller.v1.HttpSnapshotR\bsnapshot\"\x91\x01\n" +
 	"\x0fProcessResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12*\n" +
@@ -596,12 +765,23 @@ const file_controller_v1_controller_proto_rawDesc = "" +
 	"\bDecision\x125\n" +
 	"\bcontinue\x18\x01 \x01(\v2\x17.controller.v1.ContinueH\x00R\bcontinue\x12/\n" +
 	"\x06cancel\x18\x02 \x01(\v2\x15.controller.v1.CancelH\x00R\x06cancelB\b\n" +
-	"\x06action\"\x86\x01\n" +
+	"\x06action\"\xcf\x01\n" +
 	"\bContinue\x12>\n" +
-	"\aheaders\x18\x01 \x03(\v2$.controller.v1.Continue.HeadersEntryR\aheaders\x1a:\n" +
+	"\aheaders\x18\x01 \x03(\v2$.controller.v1.Continue.HeadersEntryR\aheaders\x12%\n" +
+	"\x0eremove_headers\x18\x02 \x03(\tR\rremoveHeaders\x12\x17\n" +
+	"\x04body\x18\x03 \x01(\fH\x00R\x04body\x88\x01\x01\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xae\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
+	"\x05_body\"0\n" +
+	"\x06Header\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\x92\x01\n" +
+	"\fHttpSnapshot\x12/\n" +
+	"\aheaders\x18\x01 \x03(\v2\x15.controller.v1.HeaderR\aheaders\x12\x12\n" +
+	"\x04body\x18\x02 \x01(\fR\x04body\x12%\n" +
+	"\x0ebody_truncated\x18\x03 \x01(\bR\rbodyTruncated\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\x05R\x06status\"\xae\x01\n" +
 	"\x06Cancel\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\x05R\x06status\x12\x12\n" +
 	"\x04body\x18\x02 \x01(\tR\x04body\x12<\n" +
@@ -638,7 +818,7 @@ func file_controller_v1_controller_proto_rawDescGZIP() []byte {
 }
 
 var file_controller_v1_controller_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_controller_v1_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_controller_v1_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_controller_v1_controller_proto_goTypes = []any{
 	(Phase)(0),                     // 0: controller.v1.Phase
 	(*CreateSessionRequest)(nil),   // 1: controller.v1.CreateSessionRequest
@@ -649,32 +829,39 @@ var file_controller_v1_controller_proto_goTypes = []any{
 	(*ProcessResponse)(nil),        // 6: controller.v1.ProcessResponse
 	(*Decision)(nil),               // 7: controller.v1.Decision
 	(*Continue)(nil),               // 8: controller.v1.Continue
-	(*Cancel)(nil),                 // 9: controller.v1.Cancel
-	nil,                            // 10: controller.v1.Continue.HeadersEntry
-	nil,                            // 11: controller.v1.Cancel.HeadersEntry
+	(*Header)(nil),                 // 9: controller.v1.Header
+	(*HttpSnapshot)(nil),           // 10: controller.v1.HttpSnapshot
+	(*Cancel)(nil),                 // 11: controller.v1.Cancel
+	nil,                            // 12: controller.v1.Continue.HeadersEntry
+	nil,                            // 13: controller.v1.Cancel.HeadersEntry
+	(*timestamppb.Timestamp)(nil),  // 14: google.protobuf.Timestamp
 }
 var file_controller_v1_controller_proto_depIdxs = []int32{
 	0,  // 0: controller.v1.CreateSessionResponse.phase:type_name -> controller.v1.Phase
-	0,  // 1: controller.v1.SubmitDecisionRequest.phase:type_name -> controller.v1.Phase
-	7,  // 2: controller.v1.SubmitDecisionRequest.decision:type_name -> controller.v1.Decision
-	0,  // 3: controller.v1.ProcessRequest.phase:type_name -> controller.v1.Phase
-	0,  // 4: controller.v1.ProcessResponse.phase:type_name -> controller.v1.Phase
-	7,  // 5: controller.v1.ProcessResponse.decision:type_name -> controller.v1.Decision
-	8,  // 6: controller.v1.Decision.continue:type_name -> controller.v1.Continue
-	9,  // 7: controller.v1.Decision.cancel:type_name -> controller.v1.Cancel
-	10, // 8: controller.v1.Continue.headers:type_name -> controller.v1.Continue.HeadersEntry
-	11, // 9: controller.v1.Cancel.headers:type_name -> controller.v1.Cancel.HeadersEntry
-	1,  // 10: controller.v1.DemoControllerService.CreateSession:input_type -> controller.v1.CreateSessionRequest
-	3,  // 11: controller.v1.DemoControllerService.SubmitDecision:input_type -> controller.v1.SubmitDecisionRequest
-	5,  // 12: controller.v1.DemoProcessorService.Process:input_type -> controller.v1.ProcessRequest
-	2,  // 13: controller.v1.DemoControllerService.CreateSession:output_type -> controller.v1.CreateSessionResponse
-	4,  // 14: controller.v1.DemoControllerService.SubmitDecision:output_type -> controller.v1.SubmitDecisionResponse
-	6,  // 15: controller.v1.DemoProcessorService.Process:output_type -> controller.v1.ProcessResponse
-	13, // [13:16] is the sub-list for method output_type
-	10, // [10:13] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 1: controller.v1.CreateSessionResponse.snapshot:type_name -> controller.v1.HttpSnapshot
+	14, // 2: controller.v1.CreateSessionResponse.deadline:type_name -> google.protobuf.Timestamp
+	0,  // 3: controller.v1.SubmitDecisionRequest.phase:type_name -> controller.v1.Phase
+	7,  // 4: controller.v1.SubmitDecisionRequest.decision:type_name -> controller.v1.Decision
+	0,  // 5: controller.v1.ProcessRequest.phase:type_name -> controller.v1.Phase
+	10, // 6: controller.v1.ProcessRequest.snapshot:type_name -> controller.v1.HttpSnapshot
+	0,  // 7: controller.v1.ProcessResponse.phase:type_name -> controller.v1.Phase
+	7,  // 8: controller.v1.ProcessResponse.decision:type_name -> controller.v1.Decision
+	8,  // 9: controller.v1.Decision.continue:type_name -> controller.v1.Continue
+	11, // 10: controller.v1.Decision.cancel:type_name -> controller.v1.Cancel
+	12, // 11: controller.v1.Continue.headers:type_name -> controller.v1.Continue.HeadersEntry
+	9,  // 12: controller.v1.HttpSnapshot.headers:type_name -> controller.v1.Header
+	13, // 13: controller.v1.Cancel.headers:type_name -> controller.v1.Cancel.HeadersEntry
+	1,  // 14: controller.v1.DemoControllerService.CreateSession:input_type -> controller.v1.CreateSessionRequest
+	3,  // 15: controller.v1.DemoControllerService.SubmitDecision:input_type -> controller.v1.SubmitDecisionRequest
+	5,  // 16: controller.v1.DemoProcessorService.Process:input_type -> controller.v1.ProcessRequest
+	2,  // 17: controller.v1.DemoControllerService.CreateSession:output_type -> controller.v1.CreateSessionResponse
+	4,  // 18: controller.v1.DemoControllerService.SubmitDecision:output_type -> controller.v1.SubmitDecisionResponse
+	6,  // 19: controller.v1.DemoProcessorService.Process:output_type -> controller.v1.ProcessResponse
+	17, // [17:20] is the sub-list for method output_type
+	14, // [14:17] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_controller_v1_controller_proto_init() }
@@ -686,13 +873,14 @@ func file_controller_v1_controller_proto_init() {
 		(*Decision_Continue)(nil),
 		(*Decision_Cancel)(nil),
 	}
+	file_controller_v1_controller_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_controller_v1_controller_proto_rawDesc), len(file_controller_v1_controller_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

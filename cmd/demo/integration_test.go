@@ -204,6 +204,9 @@ func (e *flowEnv) sendPhaseUpdate(ctx context.Context, stream *connect.ServerStr
 	if update.GetPhase() != phase {
 		return fmt.Errorf("phase update phase = %v, want %v", update.GetPhase(), phase)
 	}
+	if update.GetSnapshot() == nil {
+		return fmt.Errorf("phase update snapshot = nil, want HttpSnapshot")
+	}
 	return nil
 }
 
