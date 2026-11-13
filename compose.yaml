@@ -10,13 +10,13 @@ services:
     volumes:
       - ./envoy.yaml:/etc/envoy/envoy.yaml
     depends_on:
-      - echo
+      - upstream
       - demo
     networks:
       - demo
 
   # upstream "echo" server
-  echo:
+  upstream:
     image: ghcr.io/wrossmorrow/simple-echo-server:${ECHO_VERSION:-main}
     command:
       - -port=8000

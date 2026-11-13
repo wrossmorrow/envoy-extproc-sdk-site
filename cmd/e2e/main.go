@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -23,7 +24,6 @@ import (
 const (
 	defaultControllerAddr = "localhost:9093"
 	defaultEnvoyAddr      = "http://localhost:8081"
-	defaultPhase          = "PHASE_REQUEST_HEADERS"
 	defaultDecision       = "continue"
 )
 
@@ -31,7 +31,6 @@ func main() {
 	ctx := context.Background()
 	controllerAddr := envOr("CONTROLLER_ADDR", defaultControllerAddr)
 	envoyAddr := envOr("ENVOY_ADDR", defaultEnvoyAddr)
-	phase := envOr("PHASE", defaultPhase)
 	decisionAction := envOr("DECISION", defaultDecision)
 
 	conn, err := grpc.NewClient(controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -77,18 +76,20 @@ func main() {
 		envoyDone <- sendEnvoyBound(ctx, envoyAddr, sessionID)
 	}()
 
-	// Submit the human decision (concurrently with the create-session stream and
-	// the envoy-bound phase request).
-	if err := submitDecision(ctx, client, sessionID, phaseFromName(phase), decisionAction); err != nil {
-		fatal(err)
+	// Drain the create-session stream, submitting a human decision for each
+	// phase update as it arrives.
+	for upd := range updates {
+		log.Printf("Update received: %v\n", upd)
+		if upd.GetSessionId() != sessionID {
+			fatal(fmt.Errorf("session ID mismatch: %s vs %s (%v)", upd.GetSessionId(), sessionID, upd))
+		}
+		if err := submitDecision(ctx, client, sessionID, upd.Phase, decisionAction); err != nil {
+			fatal(err)
+		}
 	}
 
 	if err := <-envoyDone; err != nil {
 		fatal(err)
-	}
-
-	// Drain the create-session stream until it closes.
-	for range updates {
 	}
 }
 
@@ -113,30 +114,6 @@ func sendEnvoyBound(ctx context.Context, addr, sessionID string) error {
 		return fmt.Errorf("envoy-bound phase request failed: status %d body=%q", resp.StatusCode, string(respBody))
 	}
 	return nil
-}
-
-// phaseFromName converts a phase name (e.g. "PHASE_REQUEST_HEADERS") to the
-// generated Phase enum value.
-func phaseFromName(s string) v1.Phase {
-	switch s {
-	case "PHASE_UNSPECIFIED":
-		return v1.Phase_PHASE_UNSPECIFIED
-	case "PHASE_NOT_STARTED":
-		return v1.Phase_PHASE_NOT_STARTED
-	case "PHASE_REQUEST_HEADERS":
-		return v1.Phase_PHASE_REQUEST_HEADERS
-	case "PHASE_REQUEST_BODY":
-		return v1.Phase_PHASE_REQUEST_BODY
-	case "PHASE_REQUEST_TRAILERS":
-		return v1.Phase_PHASE_REQUEST_TRAILERS
-	case "PHASE_RESPONSE_HEADERS":
-		return v1.Phase_PHASE_RESPONSE_HEADERS
-	case "PHASE_RESPONSE_BODY":
-		return v1.Phase_PHASE_RESPONSE_BODY
-	case "PHASE_RESPONSE_TRAILERS":
-		return v1.Phase_PHASE_RESPONSE_TRAILERS
-	}
-	return v1.Phase_PHASE_UNSPECIFIED
 }
 
 // submitDecision submits a human decision (continue/cancel) for a session phase.
