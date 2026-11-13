@@ -45,7 +45,7 @@ type pendingDecision struct {
 }
 
 type pendingResolution struct {
-	Action string // "continue" or "cancel"
+	decision *v1.Decision
 }
 
 // SessionController owns demo sessions and their pending decisions/updates.
@@ -109,7 +109,7 @@ func (c *SessionController) GetUpdates(id string, send func(*v1.CreateSessionRes
 	}
 }
 
-func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, action string) error {
+func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, decision *v1.Decision) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s, ok := c.sessions[id]
@@ -125,8 +125,7 @@ func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase
 	if s.Pending == nil || s.Pending.Ch == nil {
 		return errors.New("no pending decision channel")
 	}
-	res := &pendingResolution{Action: action}
-	s.Pending.Ch <- res
+	s.Pending.Ch <- &pendingResolution{decision: decision}
 	s.Status = SessionStatusResolved
 	return nil
 }
@@ -168,11 +167,11 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 	c.mu.Unlock()
 	select {
 	case res := <-s.Pending.Ch:
-		return decisionResponse(s, phase, res.Action), nil
+		return decisionResponse(s, phase, res.decision), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(PhaseTimeout):
-		return decisionResponse(s, phase, "cancel"), nil
+		return decisionResponse(s, phase, nil), nil
 	}
 }
 
@@ -237,13 +236,19 @@ func (c *SessionController) BeginPhase(id string, phase int32) error {
 }
 
 // decisionResponse builds the ProcessResponse decision for a session phase
-// from a human action ("continue" or "cancel").
-func decisionResponse(s *Session, phase int32, action string) *v1.ProcessResponse {
-	decision := &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}
-	if action == "cancel" {
-		decision.Action = &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusGatewayTimeout, Headers: map[string]string{}}}
+// from the human decision. On phase timeout (decision == nil) it fails closed
+// with an immediate cancel decision.
+func decisionResponse(s *Session, phase int32, decision *v1.Decision) *v1.ProcessResponse {
+	resp := &v1.ProcessResponse{SessionId: s.ID, Phase: v1.Phase(phase)}
+	switch {
+	case decision != nil && decision.GetContinue() != nil:
+		resp.Decision = decision
+	case decision != nil && decision.GetCancel() != nil:
+		resp.Decision = decision
+	default:
+		resp.Decision = &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusGatewayTimeout, Headers: map[string]string{}}}}
 	}
-	return &v1.ProcessResponse{SessionId: s.ID, Phase: v1.Phase(phase), Decision: decision}
+	return resp
 }
 
 // DemoControllerHandler implements the Connect service.
@@ -277,18 +282,9 @@ func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.
 	})
 }
 
-// decisionAction maps a decision to a human action ("continue" or "cancel").
-func decisionAction(decision *v1.Decision) string {
-	if decision != nil && decision.GetCancel() != nil {
-		return "cancel"
-	}
-	return "continue"
-}
-
 // SubmitDecision submits a human decision for a session at a phase.
 func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error) {
-	action := decisionAction(req.Msg.GetDecision())
-	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), action); err != nil {
+	if err := h.Controller.SubmitDecision(ctx, req.Msg.GetSessionId(), int32(req.Msg.GetPhase()), req.Msg.GetDecision()); err != nil {
 		return nil, err
 	}
 	return &connect.Response[v1.SubmitDecisionResponse]{}, nil

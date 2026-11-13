@@ -207,6 +207,9 @@ func (e *flowEnv) sendPhaseUpdate(ctx context.Context, stream *connect.ServerStr
 	if update.GetSnapshot() == nil {
 		return fmt.Errorf("phase update snapshot = nil, want HttpSnapshot")
 	}
+	if phase == v1.Phase_PHASE_RESPONSE_HEADERS && update.GetSnapshot().GetStatus() != 200 {
+		return fmt.Errorf("phase update snapshot status = %d, want 200", update.GetSnapshot().GetStatus())
+	}
 	return nil
 }
 
@@ -252,7 +255,10 @@ func phaseUpdateRequest(sessionID string, kind phaseKind) (*epb.ProcessingReques
 		return &epb.ProcessingRequest{
 			Request: &epb.ProcessingRequest_ResponseHeaders{
 				ResponseHeaders: &epb.HttpHeaders{
-					Headers:     &corev3.HeaderMap{Headers: []*corev3.HeaderValue{{Key: "x-demo-session-id", Value: sessionID}}},
+					Headers: &corev3.HeaderMap{Headers: []*corev3.HeaderValue{
+						{Key: "x-demo-session-id", Value: sessionID},
+						{Key: ":status", Value: "200"},
+					}},
 					EndOfStream: true,
 				},
 			},
@@ -305,7 +311,7 @@ func assertContinueApplied(t *testing.T, resp *epb.ProcessingResponse, kind phas
 // assertCancelApplied verifies the demo extproc replied over the envoy
 // processing response stream with the immediate cancel response the demo
 // applied for the phase, carrying the fail-closed gateway status.
-func assertCancelApplied(t *testing.T, resp *epb.ProcessingResponse, kind phaseKind) {
+func assertCancelApplied(t *testing.T, resp *epb.ProcessingResponse, kind phaseKind, wantStatus int32) {
 	t.Helper()
 	if resp.GetImmediateResponse() == nil {
 		t.Fatalf("processing response = %+v, want immediate cancel response", resp)
@@ -314,8 +320,8 @@ func assertCancelApplied(t *testing.T, resp *epb.ProcessingResponse, kind phaseK
 	if immediate.GetStatus() == nil {
 		t.Fatalf("immediate cancel response = %+v, want status", immediate)
 	}
-	if immediate.GetStatus().GetCode() != http.StatusGatewayTimeout {
-		t.Fatalf("immediate cancel status = %d, want %d", immediate.GetStatus().GetCode(), http.StatusGatewayTimeout)
+	if int32(immediate.GetStatus().GetCode()) != wantStatus {
+		t.Fatalf("immediate cancel status = %d, want %d", immediate.GetStatus().GetCode(), wantStatus)
 	}
 }
 
@@ -391,7 +397,7 @@ func TestFlow_CancelDecisionShortCircuits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("integration: recv decision (cancel): %v", err)
 	}
-	assertCancelApplied(t, resp, phaseKindRequestHeaders)
+	assertCancelApplied(t, resp, phaseKindRequestHeaders, 503)
 }
 
 // TestFlow_PhaseTimeoutFailsClosed drives a phase cycle without a human decision
@@ -417,7 +423,7 @@ func TestFlow_PhaseTimeoutFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("integration: recv decision (phase timeout): %v", err)
 	}
-	assertCancelApplied(t, resp, phaseKindRequestHeaders)
+	assertCancelApplied(t, resp, phaseKindRequestHeaders, http.StatusGatewayTimeout)
 }
 
 // TestFlow_HumanDecisionValidation drives the human-facing SubmitDecision RPC

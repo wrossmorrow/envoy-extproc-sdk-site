@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strconv"
 
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
@@ -114,12 +115,18 @@ func snapshotHasHeader(headers []*v1.Header, key string) bool {
 // snapshot builds the HttpSnapshot the demo processor reports to the controller
 // for the phase being processed, from the observed headers and body. Body phases
 // report at most snapshotBodyLimit bytes; longer bodies are truncated and flagged
-// via BodyTruncated.
-func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, body []byte) *v1.HttpSnapshot {
+// via BodyTruncated. Response phases surface the response status via the
+// ":status" header the data plane sends downstream.
+func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) *v1.HttpSnapshot {
 	snap := &v1.HttpSnapshot{}
-	for name, values := range rc.AllHeaders.Headers {
+	for name, values := range headers.Headers {
 		for _, v := range values {
 			snap.Headers = append(snap.Headers, &v1.Header{Key: name, Value: v})
+		}
+	}
+	if status, ok := headers.Get(":status"); ok {
+		if code, err := strconv.Atoi(status); err == nil {
+			snap.Status = int32(code)
 		}
 	}
 	if rc.Method != "" && !snapshotHasHeader(snap.Headers, ":method") {
@@ -141,7 +148,7 @@ func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, body []byte)
 // controller for the session and waits for the controller's decision.
 func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
 	sessionID := s.sessionIDFor(headers)
-	snap := s.snapshot(rc, body)
+	snap := s.snapshot(rc, headers, body)
 	return s.sendPhase(ctx, phase, sessionID, snap)
 }
 

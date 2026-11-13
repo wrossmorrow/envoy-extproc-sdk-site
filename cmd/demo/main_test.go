@@ -79,7 +79,7 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	}
 	// Human submits a decision for the session phase; the controller resolves
 	// it and replies over the bidi stream, which the demo processor applies.
-	if err = ctrl.SubmitDecision(ctx, sessID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "continue"); err != nil {
+	if err = ctrl.SubmitDecision(ctx, sessID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err != nil {
 		t.Fatalf("submit human decision: %v", err)
 	}
 	resp, err := extprocClient.Recv()
@@ -149,7 +149,7 @@ func TestDemoProcessorAppliesCancelDecision(t *testing.T) {
 	if err = extprocClient.Send(req); err != nil {
 		t.Fatalf("send processing request: %v", err)
 	}
-	if err = ctrl.SubmitDecision(ctx, sess.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), "cancel"); err != nil {
+	if err = ctrl.SubmitDecision(ctx, sess.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: 503, Headers: map[string]string{}}}}); err != nil {
 		t.Fatalf("submit human decision: %v", err)
 	}
 	resp, err := extprocClient.Recv()

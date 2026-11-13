@@ -40,11 +40,7 @@ func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, s
 // SubmitDecision receives a human decision for a session phase and resolves
 // the session's pending decision.
 func (s *DemoControllerGRPCServer) SubmitDecision(ctx context.Context, req *v1.SubmitDecisionRequest) (*v1.SubmitDecisionResponse, error) {
-	action := "continue"
-	if req.GetDecision().GetCancel() != nil {
-		action = "cancel"
-	}
-	if err := s.Controller.SubmitDecision(ctx, req.GetSessionId(), int32(req.GetPhase()), action); err != nil {
+	if err := s.Controller.SubmitDecision(ctx, req.GetSessionId(), int32(req.GetPhase()), req.GetDecision()); err != nil {
 		return nil, err
 	}
 	return &v1.SubmitDecisionResponse{}, nil
