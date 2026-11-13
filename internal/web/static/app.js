@@ -7,7 +7,8 @@
 // same-origin envoy proxy, which relays them to the Envoy instance fronting the
 // demo extproc.
 
-const CONNECT_CONTENT_TYPE = "application/connect+json";
+const CONNECT_CONTENT_TYPE = "application/connect+json"; // server-streaming
+const CONNECT_UNARY_CONTENT_TYPE = "application/json"; // unary
 const CONNECT_PROTOCOL_VERSION = "1";
 const ENVOY_PROXY = "/envoy/";
 const SESSION_HEADER = "x-demo-session-id";
@@ -165,14 +166,14 @@ function frameConnectMessage(body) {
   return frame;
 }
 
-async function fetchConnect(url, body) {
+async function fetchConnect(url, body, contentType, frame) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Content-Type": CONNECT_CONTENT_TYPE,
+      "Content-Type": contentType,
       "Connect-Protocol-Version": CONNECT_PROTOCOL_VERSION,
     },
-    body: frameConnectMessage(body),
+    body: frame ? frameConnectMessage(body) : body,
   });
   if (!res.ok) {
     let detail = "";
@@ -246,6 +247,8 @@ async function createSession() {
   const res = await fetchConnect(
     location.origin + CONTROLLER_BASE + "/CreateSession",
     JSON.stringify({}),
+    CONNECT_CONTENT_TYPE,
+    true,
   );
   const stream = new ConnectStream(res);
   state.stream = stream;
@@ -297,6 +300,8 @@ async function submitDecision(action) {
         phase: state.phase,
         decision: decision,
       }),
+      CONNECT_UNARY_CONTENT_TYPE,
+      false,
     );
     if (!res.ok) {
       throw new Error("controller Connect request failed: HTTP " + res.status);
