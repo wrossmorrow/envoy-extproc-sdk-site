@@ -190,8 +190,8 @@ func TestSessionController_ResolveDecision_TimesOutMarksSessionResolved(t *testi
 	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
 		t.Fatalf("BeginPhase() error = %v, want nil", err)
 	}
-	if _, err := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
-		t.Fatalf("ResolveDecision() error = %v, want nil", err)
+	if _, resolveErr := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); resolveErr != nil {
+		t.Fatalf("ResolveDecision() error = %v, want nil", resolveErr)
 	}
 	if s.Status != SessionStatusResolved {
 		t.Fatalf("ResolveDecision() status = %v, want %v", s.Status, SessionStatusResolved)
