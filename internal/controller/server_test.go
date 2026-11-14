@@ -410,3 +410,73 @@ func TestSessionController_Metrics_PhasesPending(t *testing.T) {
 		t.Fatalf("demo_controller_phases_pending = %v, want %v after resolve", got, before)
 	}
 }
+
+func TestSessionController_SessionInFlight(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	defer c.removeSession(s.ID)
+	if inFlight, inErr := c.SessionInFlight(s.ID); inErr != nil || inFlight {
+		t.Fatalf("SessionInFlight() = %v, %v; want false, nil before BeginPhase", inFlight, inErr)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	if inFlight, inErr := c.SessionInFlight(s.ID); inErr != nil || !inFlight {
+		t.Fatalf("SessionInFlight() = %v, %v; want true, nil after BeginPhase", inFlight, inErr)
+	}
+	decisionCh := make(chan *v1.ProcessResponse, 1)
+	decisionErrCh := make(chan error, 1)
+	go func() {
+		decision, decisionErr := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS))
+		decisionCh <- decision
+		decisionErrCh <- decisionErr
+	}()
+	s.Pending.Ch <- &pendingResolution{decision: &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}}
+	dec := <-decisionCh
+	decisionErr := <-decisionErrCh
+	if decisionErr != nil {
+		t.Fatalf("ResolveDecision() error = %v, want nil", decisionErr)
+	}
+	if dec.GetDecision().GetContinue() == nil {
+		t.Fatalf("ResolveDecision() decision = %+v, want continue", dec)
+	}
+	s.Status = SessionStatusResolved
+	if inFlight, err := c.SessionInFlight(s.ID); err != nil || inFlight {
+		t.Fatalf("SessionInFlight() = %v, %v; want false, nil after resolve", inFlight, err)
+	}
+}
+
+func TestSessionController_ResolveConflict(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	defer c.removeSession(s.ID)
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	resp, err := c.ResolveConflict(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS))
+	if err != nil {
+		t.Fatalf("ResolveConflict() error = %v, want nil", err)
+	}
+	if resp.GetDecision().GetCancel() == nil {
+		t.Fatalf("ResolveConflict() decision = %+v, want cancel", resp)
+	}
+	if status := resp.GetDecision().GetCancel().GetStatus(); status != http.StatusConflict {
+		t.Fatalf("ResolveConflict() cancel status = %d, want %d", status, http.StatusConflict)
+	}
+	updated, err := c.GetSession(s.ID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v, want nil", err)
+	}
+	if updated.Status != SessionStatusResolved {
+		t.Fatalf("ResolveConflict() Status = %v, want %v", updated.Status, SessionStatusResolved)
+	}
+	if inFlight, err := c.SessionInFlight(s.ID); err != nil || inFlight {
+		t.Fatalf("SessionInFlight() = %v, %v; want false, nil after conflict", inFlight, err)
+	}
+}

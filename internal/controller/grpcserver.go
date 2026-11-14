@@ -76,6 +76,20 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 		// A phase update means the session is now in flight at that phase; await
 		// the human decision (or phase timeout) and reply over the stream.
 		phase := phaseFromExtproc(int32(update.Phase))
+		inFlight, inErr := s.Controller.SessionInFlight(update.SessionId)
+		if inErr == nil && inFlight {
+			// The session already has an exchange in flight: reject the phase
+			// update with a 409 conflict and resolve the session so the
+			// in-flight exchange cannot accept further decisions.
+			conflictResp, conflictErr := s.Controller.ResolveConflict(update.SessionId, int32(phase))
+			if conflictErr != nil {
+				return conflictErr
+			}
+			if err = stream.Send(conflictResp); err != nil {
+				return err
+			}
+			return nil
+		}
 		if err = s.Controller.BeginPhase(update.SessionId, int32(phase)); err != nil {
 			return err
 		}
