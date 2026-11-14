@@ -226,6 +226,32 @@ func (c *SessionController) PhaseDeadline(id string) time.Time {
 	return s.PhaseDeadline
 }
 
+// SessionInFlight reports whether the session identified by id currently has
+// an exchange in flight (status InFlight).
+func (c *SessionController) SessionInFlight(id string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return false, errSessionNotFound
+	}
+	return s.Status == SessionStatusInFlight, nil
+}
+
+// ResolveConflict answers a phase update that arrives for a session already in
+// flight with a 409 conflict decision, leaving the in-flight exchange and its
+// pending human decision untouched so the session remains usable.
+func (c *SessionController) ResolveConflict(sessionID string, phase int32) (*v1.ProcessResponse, error) {
+	c.mu.Lock()
+	s, ok := c.sessions[sessionID]
+	c.mu.Unlock()
+	if !ok {
+		return nil, errSessionNotFound
+	}
+	conflict := &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusConflict, Headers: map[string]string{}}}}
+	return decisionResponse(s, phase, conflict), nil
+}
+
 // ResolveDecision resolves the decision for a session phase and returns the
 // decision to send back to the extproc over the Process bidi stream. It awaits
 // the pending human decision (see SubmitDecision) and, on phase timeout, fails
