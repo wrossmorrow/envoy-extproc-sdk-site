@@ -2,21 +2,50 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
+	"sync"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	defaultControllerAddr = "controller:9093"
 	sessionIDHeader       = "x-demo-session-id"
+
+	// controllerStreamKey is the RequestContext data key holding the controller
+	// bidi stream handle for the current exchange phase.
+	controllerStreamKey = "controllerDemoStream"
+
+	// controllerStreamCancelKey is the RequestContext data key holding the cancel
+	// function for the controller bidi stream of the current exchange phase.
+	controllerStreamCancelKey = "controllerDemoStreamCancel"
+
+	// controllerSessionIDKey is the RequestContext data key holding the controller
+	// session id for the current exchange phase.
+	controllerSessionIDKey = "controllerDemoSessionID"
+
+	// defaultExchangeTimeout bounds a single controller exchange phase stream (the
+	// per-exchange budget across the exchange's phases).
+	defaultExchangeTimeout = 5 * time.Minute
+
+	// demoMetricsPort is the port the demo serves its own Prometheus metrics
+	// endpoint on (Go runtime goroutines) in addition to the SDK metrics endpoint.
+	demoMetricsPort = 9096
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -26,9 +55,15 @@ type demoRequestProcessor struct {
 	opts   *extproc.ProcessingOptions
 	logger *slog.Logger
 
-	conn      *grpc.ClientConn
-	sessionID string
-	stream    grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]
+	// controllerConn is the single controller client connection shared by all
+	// exchanges. Stream handles are held per exchange in the request context and
+	// retired individually; the connection itself is shared, not per exchange.
+	controllerMu   sync.Mutex
+	controllerConn *grpc.ClientConn
+
+	// exchangeTimeout bounds a single controller exchange phase stream (the
+	// per-exchange budget across the exchange's phases).
+	exchangeTimeout time.Duration
 
 	controllerAddr string
 }
@@ -39,10 +74,10 @@ func newDemoRequestProcessor() *demoRequestProcessor {
 		addr = defaultControllerAddr
 	}
 	return &demoRequestProcessor{
-		opts:           &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
-		logger:         slog.Default(),
-		sessionID:      "",
-		controllerAddr: addr,
+		opts:            &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
+		logger:          slog.Default(),
+		controllerAddr:  addr,
+		exchangeTimeout: defaultExchangeTimeout,
 	}
 }
 
@@ -54,51 +89,132 @@ func (s *demoRequestProcessor) GetOptions() *extproc.ProcessingOptions {
 	return s.opts
 }
 
-// controllerStream returns the controller bidi stream, opening one lazily.
-func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
-	if s.stream != nil {
-		return s.stream, nil
+// controllerClient returns the shared controller client connection, opening it
+// lazily on first use.
+func (s *demoRequestProcessor) controllerClient() (*grpc.ClientConn, error) {
+	s.controllerMu.Lock()
+	defer s.controllerMu.Unlock()
+	if s.controllerConn != nil {
+		return s.controllerConn, nil
 	}
 	conn, err := grpc.NewClient(s.controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
-	s.conn = conn
-	client := v1.NewDemoProcessorServiceClient(conn)
-	st, err := client.Process(ctx)
+	s.controllerConn = conn
+	return conn, nil
+}
+
+// controllerStream returns the controller bidi stream for the current exchange
+// phase, reading it from the per-request context first and opening a fresh one
+// when absent. The handle is stored on the RequestContext (which persists across
+// phases of an exchange), scoping it to the exchange rather than the processor
+// instance. The underlying connection is the shared controller connection.
+func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc.RequestContext) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
+	if v, err := rc.GetValue(controllerStreamKey); err == nil {
+		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
+			return st, nil
+		}
+	}
+	conn, err := s.controllerClient()
 	if err != nil {
 		return nil, err
 	}
-	s.stream = st
+	client := v1.NewDemoProcessorServiceClient(conn)
+	// Open the exchange phase stream with a deadline so the stream cannot outlive
+	// its exchange budget, and keep the cancel function alongside the handle.
+	streamCtx, cancel := context.WithTimeout(ctx, s.exchangeTimeout)
+	st, err := client.Process(streamCtx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	rc.SetValue(controllerStreamKey, st)
+	rc.SetValue(controllerStreamCancelKey, cancel)
 	return st, nil
+}
+
+// retireStream closes and clears the controller stream handle held in the
+// request context. It must be called when a phase fails or the phase signaled
+// end-of-stream during a response phase after a decision, so a dead stream is
+// never reused by a later phase of the exchange and a resolved exchange does not
+// leave the stream open.
+// Closing the send direction and cancelling the stream context releases the
+// exchange phase stream.
+func (s *demoRequestProcessor) retireStream(rc *extproc.RequestContext) {
+	if v, err := rc.GetValue(controllerStreamKey); err == nil {
+		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
+			_ = st.CloseSend()
+		}
+	}
+	if cancel, err := rc.GetValue(controllerStreamCancelKey); err == nil {
+		if c, ok := cancel.(context.CancelFunc); ok {
+			c()
+		}
+	}
+	rc.SetValue(controllerStreamKey, nil)
+	rc.SetValue(controllerStreamCancelKey, nil)
 }
 
 // sendPhase sends a phase update carrying the phase snapshot to the controller
 // for the session and waits for the controller's decision. Returns the decision
 // (continue/cancel).
-func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessionID string, snapshot *v1.HttpSnapshot) (*v1.ProcessResponse, error) {
-	stream, err := s.controllerStream(ctx)
+func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, rc *extproc.RequestContext, sessionID string, snapshot *v1.HttpSnapshot) (*v1.ProcessResponse, error) {
+	stream, err := s.controllerStream(ctx, rc)
 	if err != nil {
 		return nil, err
 	}
 	if err = stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase), Snapshot: snapshot}); err != nil {
+		s.retireStream(rc)
 		return nil, err
 	}
 	dec, err := stream.Recv()
 	if err != nil {
+		s.retireStream(rc)
 		return nil, err
+	}
+	// Phase resolved (decision received); retire the controller stream when the
+	// phase signaled end-of-stream and this was a response phase, closing the
+	// exchange. End-of-stream marks the end of a single direction (e.g. request
+	// headers for a bodyless GET), not the end of the exchange, so only retire for
+	// response phases. Otherwise keep the handle in the request context so the
+	// next phase of the same exchange reuses it.
+	if rc.EndOfStream && isResponsePhase(phase) {
+		s.retireStream(rc)
 	}
 	return dec, nil
 }
 
+// isResponsePhase reports whether the extproc phase is a response phase. Only
+// response phases (headers/body/trailers) mark the end of the direction the demo
+// retires on, so end-of-stream is only honored for them.
+func isResponsePhase(phase int32) bool {
+	return phase >= extproc.REQUEST_PHASE_RESPONSE_HEADERS && phase <= extproc.REQUEST_PHASE_RESPONSE_TRAILERS
+}
+
+// sendPhaseAndDecide sends a phase update carrying the phase snapshot to the
+// controller for the session and waits for the controller's decision. Returns
+// the decision (continue/cancel).
+func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
+	sessionID := s.sessionIDFor(rc, headers)
+	snap := s.snapshot(rc, headers, body)
+	return s.sendPhase(ctx, phase, rc, sessionID, snap)
+}
+
 // sessionIDFor resolves the controller session id for an incoming phase from
-// the request headers, falling back to the stored session id when absent.
-func (s *demoRequestProcessor) sessionIDFor(headers extproc.AllHeaders) string {
+// the request context (falling back to the request headers). Resolution is per
+// request context, so concurrent exchanges do not clobber each other.
+func (s *demoRequestProcessor) sessionIDFor(rc *extproc.RequestContext, headers extproc.AllHeaders) string {
+	if id, err := rc.GetValue(controllerSessionIDKey); err == nil {
+		if sid, ok := id.(string); ok && sid != "" {
+			return sid
+		}
+	}
 	if id, ok := headers.Get(sessionIDHeader); ok && id != "" {
-		s.sessionID = id
+		rc.SetValue(controllerSessionIDKey, id)
 		return id
 	}
-	return s.sessionID
+	return ""
 }
 
 const snapshotBodyLimit = 16 * 1024 // cap on bodies reported in phase snapshots
@@ -164,14 +280,6 @@ func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, headers extp
 	return snap
 }
 
-// sendPhaseAndDecide sends a phase update carrying the phase snapshot to the
-// controller for the session and waits for the controller's decision.
-func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
-	sessionID := s.sessionIDFor(headers)
-	snap := s.snapshot(rc, headers, body)
-	return s.sendPhase(ctx, phase, sessionID, snap)
-}
-
 // resolvePhase sends a phase update carrying the phase snapshot to the
 // controller for the session and applies the controller's decision (continue
 // mutations or cancel) to the phase context. It returns any error from sending
@@ -209,6 +317,9 @@ func (s *demoRequestProcessor) resolvePhase(ctx context.Context, phase int32, rc
 	}
 	if decision.GetCancel() != nil {
 		cancel := decision.GetCancel()
+		// A cancel ends the exchange, so retire the controller phase stream before
+		// surfacing the cancellation to the phase context.
+		s.retireStream(rc)
 		return rc.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil
@@ -263,6 +374,13 @@ func (s *demoRequestProcessor) ProcessRequestTrailers(ctx *extproc.RequestContex
 }
 
 func (s *demoRequestProcessor) ErrorHandler(ctx *extproc.RequestContext, phase int, err error) {
+	if status.Code(err) == codes.Canceled || errors.Is(err, context.Canceled) {
+		// Envoy tore the downstream down and cancelled the extproc stream; treat
+		// it as the cancellation signal for this exchange phase and clean up the
+		// controller stream handle held in the request context.
+		s.retireStream(ctx)
+		return
+	}
 	s.logger.Error("demo processor error",
 		slog.String("phase", extproc.RequestPhaseToString(phase)),
 		slog.String("error", err.Error()),
@@ -270,6 +388,11 @@ func (s *demoRequestProcessor) ErrorHandler(ctx *extproc.RequestContext, phase i
 }
 
 func (s *demoRequestProcessor) Close(gracePeriodSeconds int32) error {
+	s.controllerMu.Lock()
+	defer s.controllerMu.Unlock()
+	if s.controllerConn != nil {
+		return s.controllerConn.Close()
+	}
 	return nil
 }
 
@@ -282,4 +405,30 @@ func main() {
 	proc := newDemoRequestProcessor()
 
 	extproc.MustServe(sopts, proc, slog.Default())
+
+	startDemoMetrics(demoMetricsPort, slog.Default())
+}
+
+// startDemoMetrics starts a Prometheus metrics server for the demo that exposes
+// the Go runtime collector (goroutines) in addition to the metrics exposed by the
+// extproc SDK server started inside extproc.Serve.
+func startDemoMetrics(port int, logger *slog.Logger) {
+	registry := prometheus.NewRegistry()
+	if err := registry.Register(prometheus.NewGoCollector()); err != nil {
+		logger.Error("failed to register go runtime collector", slog.String("error", err.Error()))
+		return
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{EnableOpenMetrics: true}))
+	srv := &http.Server{
+		Addr:              ":" + strconv.Itoa(port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		logger.Info("Started demo metrics HTTP server", slog.Int("port", port))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("Failed to start demo metrics HTTP server", slog.String("error", err.Error()))
+		}
+	}()
 }

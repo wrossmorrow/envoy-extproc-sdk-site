@@ -154,6 +154,53 @@ func TestSessionController_ResolveDecision_ReturnsCancelOnPhaseTimeout(t *testin
 	}
 }
 
+// TestSessionController_SubmitDecision_RejectsLateDecisionAfterResolution
+// asserts that a decision submitted after a phase already resolved (human
+// decision) is rejected, so late decisions cannot drive an already-resolved
+// phase.
+func TestSessionController_SubmitDecision_RejectsLateDecisionAfterResolution(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	if err = c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err != nil {
+		t.Fatalf("SubmitDecision() error = %v, want nil", err)
+	}
+	if err = c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err == nil {
+		t.Fatalf("SubmitDecision() error = nil, want %v", errSessionNotInFlight)
+	}
+}
+
+// TestSessionController_ResolveDecision_TimesOutMarksSessionResolved asserts
+// that a phase timeout marks the session resolved, so a late human decision can
+// no longer be accepted for the timed-out phase.
+func TestSessionController_ResolveDecision_TimesOutMarksSessionResolved(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	oldTimeout := PhaseTimeout
+	PhaseTimeout = 50 * time.Millisecond
+	defer func() { PhaseTimeout = oldTimeout }()
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	if _, resolveErr := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); resolveErr != nil {
+		t.Fatalf("ResolveDecision() error = %v, want nil", resolveErr)
+	}
+	if s.Status != SessionStatusResolved {
+		t.Fatalf("ResolveDecision() status = %v, want %v", s.Status, SessionStatusResolved)
+	}
+	if err = c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err == nil {
+		t.Fatalf("SubmitDecision() error = nil, want %v", errSessionNotInFlight)
+	}
+}
+
 func TestSessionController_ResolveDecision_RejectsWhenNotInFlight(t *testing.T) {
 	c := NewSessionController()
 	s, err := c.CreateSession()
@@ -288,5 +335,78 @@ func TestSessionController_SubmitDecision_SanitizesCancelDecision(t *testing.T) 
 	}
 	if got := int64(len(cancel.GetBody())); got > MaxCancelBodyBytes {
 		t.Fatalf("ResolveDecision() cancel body length = %d, want <= %d", got, MaxCancelBodyBytes)
+	}
+}
+
+// demoControllerGaugeValue reads the current value of a named controller
+// logical metric from the controller metrics registry.
+func demoControllerGaugeValue(t *testing.T, name string) float64 {
+	t.Helper()
+	mfs, err := demoControllerMetrics.Gather()
+	if err != nil {
+		t.Fatalf("gather controller metrics: %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != name {
+			continue
+		}
+		metrics := mf.GetMetric()
+		if len(metrics) > 0 && metrics[0].GetGauge() != nil {
+			return metrics[0].GetGauge().GetValue()
+		}
+	}
+	return 0
+}
+
+func TestSessionController_Metrics_SessionsActive(t *testing.T) {
+	c := NewSessionController()
+	before := demoControllerGaugeValue(t, "demo_controller_sessions_active")
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if got := demoControllerGaugeValue(t, "demo_controller_sessions_active"); got != before+1 {
+		t.Fatalf("demo_controller_sessions_active = %v, want %v", got, before+1)
+	}
+	c.removeSession(s.ID)
+	if got := demoControllerGaugeValue(t, "demo_controller_sessions_active"); got != before {
+		t.Fatalf("demo_controller_sessions_active = %v, want %v after remove", got, before)
+	}
+}
+
+func TestSessionController_Metrics_PhasesPending(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	defer c.removeSession(s.ID)
+
+	before := demoControllerGaugeValue(t, "demo_controller_phases_pending")
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	if got := demoControllerGaugeValue(t, "demo_controller_phases_pending"); got != before+1 {
+		t.Fatalf("demo_controller_phases_pending = %v, want %v", got, before+1)
+	}
+
+	decisionCh := make(chan *v1.ProcessResponse, 1)
+	decisionErrCh := make(chan error, 1)
+	go func() {
+		decision, decisionErr := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS))
+		decisionCh <- decision
+		decisionErrCh <- decisionErr
+	}()
+	s.Pending.Ch <- &pendingResolution{decision: &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}}
+	dec := <-decisionCh
+	decisionErr := <-decisionErrCh
+	if decisionErr != nil {
+		t.Fatalf("ResolveDecision() error = %v, want nil", decisionErr)
+	}
+	if dec.GetDecision().GetContinue() == nil {
+		t.Fatalf("ResolveDecision() decision = %+v, want continue", dec)
+	}
+	if got := demoControllerGaugeValue(t, "demo_controller_phases_pending"); got != before {
+		t.Fatalf("demo_controller_phases_pending = %v, want %v after resolve", got, before)
 	}
 }

@@ -83,7 +83,6 @@ func newFlowEnv(t *testing.T, extProcPort, metricsPort int) *flowEnv {
 
 	proc := newDemoRequestProcessor()
 	proc.controllerAddr = env.grpcAddr
-	proc.sessionID = ""
 	demoConn, err := grpc.NewClient(
 		fmt.Sprintf("127.0.0.1:%d", extProcPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -174,16 +173,48 @@ func (e *flowEnv) nextUpdate(ctx context.Context, stream *connect.ServerStreamFo
 	return stream.Msg(), nil
 }
 
-// sendPhase sends an envoy-style phase update through the demo extproc bidi
-// stream and blocks awaiting the decision the controller sends back.
+// sendPhase sends an envoy-style phase update through a fresh demo extproc
+// bidi stream and stores it on the flow env for recvDecision to consume the
+// decision on. The demo processor retires its controller stream after each
+// phase resolves, so every phase drives through its own stream.
+// openDemoPhaseStream opens a fresh demo extproc bidi process stream and sends
+// an envoy-style phase update through it, returning the stream to receive the
+// controller's decision on.
+func (e *flowEnv) openDemoPhaseStream(ctx context.Context, sessionID string, kind phaseKind) (epb.ExternalProcessor_ProcessClient, error) {
+	req, err := phaseUpdateRequest(sessionID, kind)
+	if err != nil {
+		return nil, err
+	}
+	stream, err := epb.NewExternalProcessorClient(e.demoConn).Process(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("integration: open demo extproc process stream: %w", err)
+	}
+	if err := stream.Send(req); err != nil {
+		_ = stream.CloseSend()
+		return nil, fmt.Errorf("integration: send phase update: %w", err)
+	}
+	e.demoProc = stream
+	return stream, nil
+}
+
 func (e *flowEnv) sendPhase(ctx context.Context, sessionID string, kind phaseKind) error {
+	_, err := e.openDemoPhaseStream(ctx, sessionID, kind)
+	return err
+}
+
+// sendPhaseOn sends an envoy-style phase update through a fresh demo extproc
+// bidi process stream and returns the stream to receive the controller's
+// decision on.
+func (e *flowEnv) sendPhaseOn(ctx context.Context, stream epb.ExternalProcessor_ProcessClient, sessionID string, kind phaseKind) error {
 	req, err := phaseUpdateRequest(sessionID, kind)
 	if err != nil {
 		return err
 	}
-	if err := e.demoProc.Send(req); err != nil {
+	if err := stream.Send(req); err != nil {
+		_ = stream.CloseSend()
 		return fmt.Errorf("integration: send phase update: %w", err)
 	}
+	e.demoProc = stream
 	return nil
 }
 
@@ -218,6 +249,13 @@ func (e *flowEnv) sendPhaseUpdate(ctx context.Context, stream *connect.ServerStr
 // submitted.
 func (e *flowEnv) recvDecision(ctx context.Context) (*epb.ProcessingResponse, error) {
 	return e.demoProc.Recv()
+}
+
+// recvDecisionOn receives the decision the controller sent back over the given
+// demo extproc bidi process stream after the phase update was sent and the human
+// decision submitted.
+func (e *flowEnv) recvDecisionOn(ctx context.Context, stream epb.ExternalProcessor_ProcessClient) (*epb.ProcessingResponse, error) {
+	return stream.Recv()
 }
 
 // submitHumanDecision submits a human decision (continue/cancel) for a
@@ -455,4 +493,68 @@ func TestFlow_HumanDecisionValidation(t *testing.T) {
 	if err := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_RESPONSE_HEADERS, "continue"); err == nil {
 		t.Fatalf("integration: submit decision for phase mismatch: error = nil, want error")
 	}
+}
+
+// TestFlow_ConcurrentSessionsInterleavedPhases drives two sessions through
+// interleaved phase updates and decisions over the shared controller and demo
+// processor, exercising concurrent session handling. Phase updates for both
+// sessions are sent over their own controller-side streams before either human
+// decision is submitted and applied.
+func TestFlow_ConcurrentSessionsInterleavedPhases(t *testing.T) {
+	ctx := context.Background()
+	e := newFlowEnv(t, 50641, 9451)
+
+	streamA, idA, sessionErr := e.createSession(ctx)
+	if sessionErr != nil {
+		t.Fatalf("integration: create session A: %v", sessionErr)
+	}
+	defer func() { _ = streamA.Close() }()
+	streamB, idB, sessionErr := e.createSession(ctx)
+	if sessionErr != nil {
+		t.Fatalf("integration: create session B: %v", sessionErr)
+	}
+	defer func() { _ = streamB.Close() }()
+
+	pA, phaseErr := e.openDemoPhaseStream(ctx, idA, phaseKindRequestHeaders)
+	if phaseErr != nil {
+		t.Fatalf("integration: open demo extproc process stream (session A): %v", phaseErr)
+	}
+	pB, phaseErr := e.openDemoPhaseStream(ctx, idB, phaseKindRequestHeaders)
+	if phaseErr != nil {
+		t.Fatalf("integration: open demo extproc process stream (session B): %v", phaseErr)
+	}
+
+	// Phase A1 and B1: send interleaved envoy-style request-headers phase
+	// updates over each session's own controller-side stream.
+	if sendErr := e.sendPhaseOn(ctx, pA, idA, phaseKindRequestHeaders); sendErr != nil {
+		t.Fatalf("integration: send phase update (session A): %v", sendErr)
+	}
+	if sendErr := e.sendPhaseOn(ctx, pB, idB, phaseKindRequestHeaders); sendErr != nil {
+		t.Fatalf("integration: send phase update (session B): %v", sendErr)
+	}
+
+	// Receive the phase updates for both sessions, then submit human decisions
+	// for both and apply them.
+	if _, nextErr := e.nextUpdate(ctx, streamA); nextErr != nil {
+		t.Fatalf("integration: next phase update (session A): %v", nextErr)
+	}
+	if _, nextErr := e.nextUpdate(ctx, streamB); nextErr != nil {
+		t.Fatalf("integration: next phase update (session B): %v", nextErr)
+	}
+	if submitErr := e.submitHumanDecision(ctx, idA, v1.Phase_PHASE_REQUEST_HEADERS, "continue"); submitErr != nil {
+		t.Fatalf("integration: submit human decision (session A): %v", submitErr)
+	}
+	if submitErr := e.submitHumanDecision(ctx, idB, v1.Phase_PHASE_REQUEST_HEADERS, "continue"); submitErr != nil {
+		t.Fatalf("integration: submit human decision (session B): %v", submitErr)
+	}
+	decA, recvErr := e.recvDecisionOn(ctx, pA)
+	if recvErr != nil {
+		t.Fatalf("integration: recv decision (session A): %v", recvErr)
+	}
+	assertContinueApplied(t, decA, phaseKindRequestHeaders)
+	decB, recvErr := e.recvDecisionOn(ctx, pB)
+	if recvErr != nil {
+		t.Fatalf("integration: recv decision (session B): %v", recvErr)
+	}
+	assertContinueApplied(t, decB, phaseKindRequestHeaders)
 }

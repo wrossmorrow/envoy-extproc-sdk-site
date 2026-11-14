@@ -33,7 +33,7 @@ func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, s
 	}); err != nil {
 		return err
 	}
-	return s.Controller.GetUpdates(sess.ID, func(u *v1.CreateSessionResponse) error {
+	return s.Controller.GetUpdates(stream.Context(), sess.ID, func(u *v1.CreateSessionResponse) error {
 		return stream.Send(u)
 	})
 }
@@ -62,6 +62,8 @@ type DemoProcessorGRPCServer struct {
 // decisions back.
 func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.ProcessRequest, v1.ProcessResponse]) error {
 	ctx := stream.Context()
+	demoControllerProcessStreamsOpen.Inc()
+	defer func() { demoControllerProcessStreamsOpen.Dec() }()
 	for {
 		update, err := stream.Recv()
 		if err != nil {

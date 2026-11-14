@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
@@ -62,6 +64,36 @@ var (
 	errSessionTimedOut    = errors.New("session timed out")
 )
 
+// Logical metrics for the demo controller's session and phase handling. The
+// controller tracks how many sessions are open, how many phases are awaiting a
+// human decision, and how many controller<->extproc process streams are open.
+var (
+	demoControllerSessionsActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "demo_controller_sessions_active",
+		Help: "Current number of demo controller sessions open.",
+	})
+	demoControllerPhasesPending = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "demo_controller_phases_pending",
+		Help: "Current number of demo controller phases awaiting a human decision.",
+	})
+	demoControllerProcessStreamsOpen = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "demo_controller_process_streams_open",
+		Help: "Current number of open demo controller process streams.",
+	})
+
+	demoControllerMetrics = func() *prometheus.Registry {
+		reg := prometheus.NewRegistry()
+		reg.MustRegister(demoControllerSessionsActive, demoControllerPhasesPending, demoControllerProcessStreamsOpen)
+		return reg
+	}()
+)
+
+// MetricsRegistry returns the Prometheus registry backing the demo controller's
+// logical metrics.
+func MetricsRegistry() *prometheus.Registry {
+	return demoControllerMetrics
+}
+
 func NewSessionController() *SessionController {
 	return &SessionController{sessions: map[string]*Session{}}
 }
@@ -69,12 +101,13 @@ func NewSessionController() *SessionController {
 func (c *SessionController) CreateSession() (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	demoControllerSessionsActive.Inc()
 	s := &Session{
 		ID:            newSessionID(),
 		Status:        SessionStatusNew,
 		Updates:       make(chan *Update, 16),
 		CreatedAt:     time.Now(),
-		ExpiresAt:     time.Now().Add(30 * time.Second),
+		ExpiresAt:     time.Now().Add(SessionTTL),
 		PhaseDeadline: time.Now().Add(PhaseTimeout),
 	}
 	c.sessions[s.ID] = s
@@ -91,11 +124,18 @@ func (c *SessionController) GetSession(id string) (*Session, error) {
 	return s, nil
 }
 
-func (c *SessionController) GetUpdates(id string, send func(*v1.CreateSessionResponse) error) error {
+// GetUpdates streams phase updates for a session to a client with an open
+// updates stream. It returns when the client goes away (ctx cancelled), when
+// the session expires, or when the updates stream closes. On return the
+// session is dropped from the controller so it cannot leak.
+func (c *SessionController) GetUpdates(ctx context.Context, id string, send func(*v1.CreateSessionResponse) error) error {
 	s, err := c.GetSession(id)
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer func() { c.removeSession(id) }()
 	for {
 		select {
 		case u, ok := <-s.Updates:
@@ -105,10 +145,21 @@ func (c *SessionController) GetUpdates(id string, send func(*v1.CreateSessionRes
 			if err := send(u); err != nil {
 				return err
 			}
-		case <-time.After(30 * time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Until(s.ExpiresAt)):
 			return errSessionTimedOut
 		}
 	}
+}
+
+// removeSession drops a session from the controller's session table once its
+// updates stream has ended.
+func (c *SessionController) removeSession(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.sessions, id)
+	demoControllerSessionsActive.Dec()
 }
 
 func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, decision *v1.Decision) error {
@@ -155,6 +206,10 @@ func sanitizeCancelDecision(decision *v1.Decision) *v1.Decision {
 // session phase before failing the phase closed with an immediate cancel.
 var PhaseTimeout = 30 * time.Second
 
+// SessionTTL is how long a session stays open for its updates stream before
+// GetUpdates gives up on the browser-side stream.
+var SessionTTL = 10 * time.Minute
+
 // MaxCancelBodyBytes caps the body length accepted on human-submitted cancel
 // decisions through the public SubmitDecision endpoint.
 var MaxCancelBodyBytes int64 = 64 * 1024 // 64 KiB
@@ -198,10 +253,20 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 	c.mu.Unlock()
 	select {
 	case res := <-s.Pending.Ch:
+		demoControllerPhasesPending.Dec()
 		return decisionResponse(s, phase, res.decision), nil
 	case <-ctx.Done():
+		demoControllerPhasesPending.Dec()
 		return nil, ctx.Err()
 	case <-time.After(time.Until(s.PhaseDeadline)):
+		// Phase timed out: fail closed and mark the session resolved so a late
+		// decision can no longer be accepted for the timed-out phase. Clear the
+		// pending decision so it cannot be satisfied by a late update.
+		c.mu.Lock()
+		s.Status = SessionStatusResolved
+		s.Pending = nil
+		c.mu.Unlock()
+		demoControllerPhasesPending.Dec()
 		return decisionResponse(s, phase, nil), nil
 	}
 }
@@ -256,6 +321,7 @@ func (c *SessionController) BeginPhase(id string, phase int32) error {
 		return errSessionNotFound
 	}
 	s.Status = SessionStatusInFlight
+	demoControllerPhasesPending.Inc()
 	s.Phase = phase
 	s.PhaseDeadline = time.Now().Add(PhaseTimeout)
 	if s.Pending == nil {
@@ -309,7 +375,7 @@ func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.
 	}); err != nil {
 		return err
 	}
-	return h.Controller.GetUpdates(s.ID, func(u *v1.CreateSessionResponse) error {
+	return h.Controller.GetUpdates(ctx, s.ID, func(u *v1.CreateSessionResponse) error {
 		return stream.Send(u)
 	})
 }
