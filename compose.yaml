@@ -1,6 +1,6 @@
 services:
 
-  # envoy, configured as with envoy.yaml to use the demo extproc
+  # envoy, configured as with envoy.yaml to use the extproc
   envoy:
     image: envoyproxy/envoy:${ENVOY_VERSION:-v1.35-latest}
     command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
@@ -20,7 +20,7 @@ services:
     image: ghcr.io/wrossmorrow/simple-echo-server:${ECHO_VERSION:-main}
     command:
       - -port=8000
-      - -name=demo
+      - -name=envoy-extproc-sdk-demo-upstream
     ports:
       - "8005:8000"
     networks:
@@ -49,9 +49,9 @@ services:
     networks:
       - demo
 
-  # demo extproc (minimal M1: request headers phase interception)
+  # extproc, integrated with envoy and holds requests for interactive handling
   extproc:
-    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-demo:${DEMO_VERSION:-local}
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-extproc:${DEMO_VERSION:-local}
     build:
       context: .
       dockerfile: Dockerfile
