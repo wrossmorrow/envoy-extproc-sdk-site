@@ -73,6 +73,7 @@ const state = {
   removeHeaders: new Set(), // header names marked for removal at this phase
   originalBody: null, // decoded snapshot body, to detect edits
   deciding: false,
+  pendingFinalize: null, // {phase, finalize} while a decision is in flight
   steps: {}, // pipeline step -> state
 };
 
@@ -177,6 +178,8 @@ async function startSession() {
   state.sessionAbort = abort;
   state.sessionId = null;
   state.requestInFlight = false;
+  // The response can also beat the last decision's SubmitDecision reply.
+  if (state.pendingFinalize) state.pendingFinalize.finalize();
   clearPause();
   setSession("connecting");
 
@@ -222,6 +225,13 @@ function handleUpdate(update) {
   }
   const phase = update.phase;
   if (!phase || phase === PHASE_NOT_STARTED) return;
+
+  // A new phase means the previous one was released, i.e. our decision landed
+  // even if its SubmitDecision response hasn't arrived yet.
+  if (state.pendingFinalize && state.pendingFinalize.phase !== phase) {
+    state.pendingFinalize.finalize();
+    state.pendingFinalize = null;
+  }
 
   state.phase = phase;
   state.phaseStartedAt = Date.now();
@@ -285,19 +295,32 @@ async function decide(action) {
     summary = "Rejected at " + phaseLabel(phase) + " with " + status;
   }
 
+  // The controller releases the phase as soon as it accepts the decision, so
+  // the next phase's update can reach us over the session stream before this
+  // call's response does. Whichever comes first marks this phase decided.
+  let finalized = false;
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    setStep(phase, action === "continue" ? "passed" : "rejected");
+    if (action === "continue") setLane(phase, { up: "ok", upText: "↑ continue", proc: "replied", sub: "replied" });
+    else setLane(phase, { up: "bad", upText: "↑ immediate " + decision.cancel.status, proc: "rejected", sub: "rejected" });
+    log(summary + ".", action === "continue" ? "ok" : "bad");
+  };
+  state.pendingFinalize = { phase, finalize };
+
   try {
     await unary("SubmitDecision", { sessionId: state.sessionId, phase, decision });
   } catch (err) {
+    if (state.pendingFinalize && state.pendingFinalize.phase === phase) state.pendingFinalize = null;
+    if (finalized) return; // the server moved on regardless; the decision landed
     state.deciding = false;
     showDecisionError("That decision didn't go through: " + err.message + ".");
     return;
   }
-  if (state.phase !== phase) return; // a newer phase already arrived
-  setStep(phase, action === "continue" ? "passed" : "rejected");
-  if (action === "continue") setLane(phase, { up: "ok", upText: "↑ continue", proc: "replied", sub: "replied" });
-  else setLane(phase, { up: "bad", upText: "↑ immediate " + decision.cancel.status, proc: "rejected", sub: "rejected" });
-  log(summary + ".", action === "continue" ? "ok" : "bad");
-  clearPause();
+  finalize();
+  if (state.pendingFinalize && state.pendingFinalize.phase === phase) state.pendingFinalize = null;
+  if (state.phase === phase) clearPause(); // otherwise a newer phase is already showing
 }
 
 // editedBodyText returns the edited body text, or null if unchanged or not editable.
@@ -308,6 +331,7 @@ function editedBodyText() {
 }
 
 function clearPause() {
+  state.pendingFinalize = null;
   state.phase = null;
   state.snapshot = null;
   state.removeHeaders = new Set();
@@ -388,6 +412,8 @@ async function sendRequest() {
   const elapsed = Math.round(performance.now() - started);
 
   state.requestInFlight = false;
+  // The response can also beat the last decision's SubmitDecision reply.
+  if (state.pendingFinalize) state.pendingFinalize.finalize();
   clearPause();
   const rejectedEarly = Object.entries(state.steps).some(([k, v]) => REQUEST_PHASES.has(k) && v === "rejected");
   if (!rejectedEarly && result.status > 0) setStep("upstream", "done");
