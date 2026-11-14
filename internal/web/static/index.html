@@ -3,44 +3,158 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Envoy ExtProc Interactive Demo</title>
+    <title>Envoy ext_proc, live</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <main>
-      <h1>Envoy ExtProc Interactive Demo</h1>
-      <p class="lede">
-        Send a request through Envoy and watch the <code>ext_proc</code> processor
-        intercept it, phase by phase, while you decide what happens next.
-      </p>
-
-      <section class="panel" id="session-panel">
-        <h2>Session</h2>
-        <button id="new-session">Start a new session</button>
-        <p id="session-status">No session yet.</p>
-        <p>
-          Session ID:
-          <code id="session-id">—</code>
-        </p>
-      </section>
-
-      <section class="panel" id="phase-panel">
-        <h2>Phase</h2>
-        <p id="phase-status">Create a session to begin.</p>
-        <div class="decisions">
-          <button id="btn-continue" disabled>Continue</button>
-          <button id="btn-cancel" disabled>Cancel</button>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <h1>Envoy <code>ext_proc</code>, live</h1>
+          <p class="lede">
+            Send a request through Envoy. An external processor pauses it at each
+            phase, and you decide what happens next.
+          </p>
         </div>
-      </section>
+        <div class="session">
+          <span class="session-dot" id="session-dot" aria-hidden="true"></span>
+          <span id="session-label">Connecting…</span>
+          <button type="button" class="ghost small" id="new-session">New session</button>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Processor implementation">
+        <button type="button" role="tab" data-lang="go" aria-selected="true">Go</button>
+        <button type="button" role="tab" data-lang="rust" aria-selected="false">Rust</button>
+        <button type="button" role="tab" data-lang="java" aria-selected="false">Java</button>
+        <button type="button" role="tab" data-lang="python" aria-selected="false">Python</button>
+      </nav>
+    </header>
 
-      <section class="panel" id="request-panel">
-        <h2>Envoy-bound request</h2>
-        <p id="envoy-status">No request sent yet.</p>
-        <button id="send-request" disabled>Send envoy-bound request</button>
-        <h3>Envoy response</h3>
-        <pre id="envoy-response">—</pre>
+    <main>
+      <p class="notice" id="lang-notice" hidden></p>
+
+      <div class="flow" id="pipeline" aria-label="Request phases">
+        <span class="lane-label r1">HTTP</span>
+        <div class="step c2" data-step="client">Browser</div>
+        <div class="step c3" data-step="PHASE_REQUEST_HEADERS">Request headers</div>
+        <div class="step c4" data-step="PHASE_REQUEST_BODY">Request body</div>
+        <div class="step c5" data-step="upstream">Upstream</div>
+        <div class="step c6" data-step="PHASE_RESPONSE_HEADERS">Response headers</div>
+        <div class="step c7" data-step="PHASE_RESPONSE_BODY">Response body</div>
+        <div class="step c8" data-step="done">Browser</div>
+        <div class="envoy-band">Envoy holds the request; one ext_proc stream for the whole exchange</div>
+        <div class="msg c3" data-msg="PHASE_REQUEST_HEADERS" aria-hidden="true"><span class="down">↓ sent</span><span class="up"></span></div>
+        <div class="msg c4" data-msg="PHASE_REQUEST_BODY" aria-hidden="true"><span class="down">↓ sent</span><span class="up"></span></div>
+        <div class="msg c6" data-msg="PHASE_RESPONSE_HEADERS" aria-hidden="true"><span class="down">↓ sent</span><span class="up"></span></div>
+        <div class="msg c7" data-msg="PHASE_RESPONSE_BODY" aria-hidden="true"><span class="down">↓ sent</span><span class="up"></span></div>
+        <span class="lane-label r4">ext_proc<br />gRPC stream</span>
+        <div class="proc c3" data-proc="PHASE_REQUEST_HEADERS"><span class="proc-name">Processor</span><span class="proc-sub"></span></div>
+        <div class="proc c4" data-proc="PHASE_REQUEST_BODY"><span class="proc-name">Processor</span><span class="proc-sub"></span></div>
+        <div class="proc c6" data-proc="PHASE_RESPONSE_HEADERS"><span class="proc-name">Processor</span><span class="proc-sub"></span></div>
+        <div class="proc c7" data-proc="PHASE_RESPONSE_BODY"><span class="proc-name">Processor</span><span class="proc-sub"></span></div>
+      </div>
+
+      <div class="workspace">
+        <section class="card" id="composer" aria-labelledby="composer-title">
+          <div class="card-head">
+            <h2 id="composer-title">Your request</h2>
+            <div class="presets" id="presets" aria-label="Presets"></div>
+          </div>
+
+          <div class="request-line">
+            <label class="sr-only" for="req-method">Method</label>
+            <select id="req-method">
+              <option>GET</option>
+              <option selected>POST</option>
+              <option>PUT</option>
+              <option>PATCH</option>
+              <option>DELETE</option>
+            </select>
+            <label class="sr-only" for="req-path">Path</label>
+            <input id="req-path" type="text" value="/orders" spellcheck="false" />
+          </div>
+
+          <label class="field-label" for="req-headers">Headers <span class="hint">one per line, <code>name: value</code></span></label>
+          <textarea id="req-headers" rows="3" spellcheck="false"></textarea>
+
+          <label class="field-label" for="req-body">Body</label>
+          <textarea id="req-body" rows="5" spellcheck="false"></textarea>
+
+          <div class="actions">
+            <button type="button" class="primary" id="send-request">Send request</button>
+            <span class="status-text" id="send-status"></span>
+          </div>
+
+          <div class="response" id="response" hidden>
+            <div class="response-head">
+              <h3>Response</h3>
+              <span class="badge" id="response-status"></span>
+              <span class="hint" id="response-meta"></span>
+            </div>
+            <details id="response-headers-wrap">
+              <summary>Headers</summary>
+              <pre id="response-headers"></pre>
+            </details>
+            <pre id="response-body"></pre>
+            <p class="hint">The echo upstream reports what it actually received, so compare this with what you sent.</p>
+          </div>
+        </section>
+
+        <section class="card intercept" id="intercept" aria-labelledby="intercept-title" aria-live="polite">
+          <div class="card-head">
+            <h2 id="intercept-title">Intercept</h2>
+            <span class="countdown" id="countdown" hidden></span>
+          </div>
+
+          <div class="empty" id="intercept-empty">
+            <p class="empty-title" id="intercept-empty-title">Nothing paused yet</p>
+            <p id="intercept-empty-body">Send a request and it'll stop here at each phase, waiting on you.</p>
+          </div>
+
+          <div id="intercept-active" hidden>
+            <div id="snapshot"></div>
+
+            <fieldset class="group">
+              <legend>Set headers on continue</legend>
+              <div id="set-headers"></div>
+              <button type="button" class="ghost small" id="add-header">Add header</button>
+            </fieldset>
+
+            <div class="decision-bar">
+              <div class="actions">
+                <button type="button" class="primary" id="btn-continue">Continue</button>
+                <span class="or">or</span>
+                <button type="button" id="btn-cancel">Reject with</button>
+                <label class="sr-only" for="cancel-status">Status code</label>
+                <select id="cancel-status">
+                  <option value="400">400</option>
+                  <option value="401">401</option>
+                  <option value="403" selected>403</option>
+                  <option value="404">404</option>
+                  <option value="418">418</option>
+                  <option value="429">429</option>
+                  <option value="503">503</option>
+                </select>
+              </div>
+              <label class="field-label" for="cancel-body">Rejection body <span class="hint">optional</span></label>
+              <input id="cancel-body" type="text" placeholder="Blocked by the demo" />
+              <p class="error" id="decision-error" hidden></p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="log-wrap" aria-labelledby="log-title">
+        <h2 id="log-title">Event log</h2>
+        <ol class="log" id="log"></ol>
       </section>
     </main>
+
+    <footer>
+      <a href="https://github.com/wrossmorrow/envoy-extproc-sdk-go">Go SDK</a>
+      <a href="https://github.com/wrossmorrow/envoy-extproc-sdk-rust">Rust SDK</a>
+      <a href="https://github.com/wrossmorrow/envoy-extproc-sdk-java">Java SDK</a>
+    </footer>
     <script src="/app.js"></script>
   </body>
 </html>
