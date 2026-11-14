@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
@@ -25,6 +26,17 @@ const (
 	// controllerStreamKey is the RequestContext data key holding the controller
 	// bidi stream handle for the current exchange phase.
 	controllerStreamKey = "controllerDemoStream"
+
+	// controllerStreamCancelKey is the RequestContext data key holding the cancel
+	// function for the controller bidi stream of the current exchange phase.
+	controllerStreamCancelKey = "controllerDemoStreamCancel"
+
+	// controllerSessionIDKey is the RequestContext data key holding the controller
+	// session id for the current exchange phase.
+	controllerSessionIDKey = "controllerDemoSessionID"
+
+	// defaultExchangeTimeout bounds a single controller exchange phase stream.
+	defaultExchangeTimeout = 30 * time.Second
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -40,6 +52,9 @@ type demoRequestProcessor struct {
 	controllerMu   sync.Mutex
 	controllerConn *grpc.ClientConn
 
+	// exchangeTimeout bounds a single controller exchange phase stream.
+	exchangeTimeout time.Duration
+
 	sessionID string
 
 	controllerAddr string
@@ -51,10 +66,11 @@ func newDemoRequestProcessor() *demoRequestProcessor {
 		addr = defaultControllerAddr
 	}
 	return &demoRequestProcessor{
-		opts:           &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
-		logger:         slog.Default(),
-		sessionID:      "",
-		controllerAddr: addr,
+		opts:            &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
+		logger:          slog.Default(),
+		sessionID:       "",
+		controllerAddr:  addr,
+		exchangeTimeout: defaultExchangeTimeout,
 	}
 }
 
@@ -93,11 +109,16 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc
 		return nil, err
 	}
 	client := v1.NewDemoProcessorServiceClient(conn)
-	st, err := client.Process(ctx)
+	// Open the exchange phase stream with a deadline so the stream cannot outlive
+	// its exchange budget, and keep the cancel function alongside the handle.
+	streamCtx, cancel := context.WithTimeout(ctx, s.exchangeTimeout)
+	st, err := client.Process(streamCtx)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	rc.SetValue(controllerStreamKey, st)
+	rc.SetValue(controllerStreamCancelKey, cancel)
 	return st, nil
 }
 
@@ -105,13 +126,21 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc
 // request context. It must be called when a phase fails or the phase has ended
 // (end-of-stream) after a decision, so a dead stream is never reused by a later
 // phase of the exchange and a resolved exchange does not leave the stream open.
+// Closing the send direction and cancelling the stream context releases the
+// exchange phase stream.
 func (s *demoRequestProcessor) retireStream(rc *extproc.RequestContext) {
 	if v, err := rc.GetValue(controllerStreamKey); err == nil {
 		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
 			_ = st.CloseSend()
 		}
 	}
+	if cancel, err := rc.GetValue(controllerStreamCancelKey); err == nil {
+		if c, ok := cancel.(context.CancelFunc); ok {
+			c()
+		}
+	}
 	rc.SetValue(controllerStreamKey, nil)
+	rc.SetValue(controllerStreamCancelKey, nil)
 }
 
 // sendPhase sends a phase update carrying the phase snapshot to the controller
@@ -145,16 +174,23 @@ func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, rc *e
 // controller for the session and waits for the controller's decision. Returns
 // the decision (continue/cancel).
 func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
-	sessionID := s.sessionIDFor(headers)
+	sessionID := s.sessionIDFor(rc, headers)
 	snap := s.snapshot(rc, headers, body)
 	return s.sendPhase(ctx, phase, rc, sessionID, snap)
 }
 
 // sessionIDFor resolves the controller session id for an incoming phase from
-// the request headers, falling back to the stored session id when absent.
-func (s *demoRequestProcessor) sessionIDFor(headers extproc.AllHeaders) string {
+// the request context (falling back to the request headers, then the stored
+// session id when absent). Resolution is per request context, so concurrent
+// exchanges do not clobber each other.
+func (s *demoRequestProcessor) sessionIDFor(rc *extproc.RequestContext, headers extproc.AllHeaders) string {
+	if id, err := rc.GetValue(controllerSessionIDKey); err == nil {
+		if sid, ok := id.(string); ok && sid != "" {
+			return sid
+		}
+	}
 	if id, ok := headers.Get(sessionIDHeader); ok && id != "" {
-		s.sessionID = id
+		rc.SetValue(controllerSessionIDKey, id)
 		return id
 	}
 	return s.sessionID
