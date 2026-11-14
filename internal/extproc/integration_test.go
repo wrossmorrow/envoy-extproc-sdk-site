@@ -1,4 +1,4 @@
-package main
+package extproc
 
 import (
 	"context"
@@ -81,8 +81,7 @@ func newFlowEnv(t *testing.T, extProcPort, metricsPort int) *flowEnv {
 	env.connectSrv = connectSrv
 	t.Cleanup(connectSrv.Close)
 
-	proc := newDemoRequestProcessor()
-	proc.controllerAddr = env.grpcAddr
+	proc := NewRequestProcessor(env.grpcAddr)
 	demoConn, err := grpc.NewClient(
 		fmt.Sprintf("127.0.0.1:%d", extProcPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
