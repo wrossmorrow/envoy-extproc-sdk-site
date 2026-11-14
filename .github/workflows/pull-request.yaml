@@ -17,11 +17,10 @@ jobs:
       - name: Check build(s)
         run: |
           go build -o /dev/null ./...
-      # test/Dockerfile is covered by the integration job, but o/w examples/Dockerfile not covered
       - name: Check image builds
         run: |
           docker build --build-arg CMD=controller .
-          docker build --build-arg CMD=demo .
+          docker build --build-arg CMD=extproc .
   vet-check:
     runs-on: ubuntu-latest
     steps:
