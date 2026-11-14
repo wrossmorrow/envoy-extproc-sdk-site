@@ -174,16 +174,24 @@ func (e *flowEnv) nextUpdate(ctx context.Context, stream *connect.ServerStreamFo
 	return stream.Msg(), nil
 }
 
-// sendPhase sends an envoy-style phase update through the demo extproc bidi
-// stream and blocks awaiting the decision the controller sends back.
+// sendPhase sends an envoy-style phase update through a fresh demo extproc
+// bidi stream and stores it on the flow env for recvDecision to consume the
+// decision on. The demo processor retires its controller stream after each
+// phase resolves, so every phase drives through its own stream.
 func (e *flowEnv) sendPhase(ctx context.Context, sessionID string, kind phaseKind) error {
 	req, err := phaseUpdateRequest(sessionID, kind)
 	if err != nil {
 		return err
 	}
-	if err := e.demoProc.Send(req); err != nil {
+	stream, err := epb.NewExternalProcessorClient(e.demoConn).Process(ctx)
+	if err != nil {
+		return fmt.Errorf("integration: open demo extproc process stream: %w", err)
+	}
+	if err := stream.Send(req); err != nil {
+		_ = stream.CloseSend()
 		return fmt.Errorf("integration: send phase update: %w", err)
 	}
+	e.demoProc = stream
 	return nil
 }
 

@@ -33,7 +33,7 @@ func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, s
 	}); err != nil {
 		return err
 	}
-	return s.Controller.GetUpdates(sess.ID, func(u *v1.CreateSessionResponse) error {
+	return s.Controller.GetUpdates(stream.Context(), sess.ID, func(u *v1.CreateSessionResponse) error {
 		return stream.Send(u)
 	})
 }

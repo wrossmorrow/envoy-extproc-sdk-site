@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,12 +12,18 @@ import (
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	defaultControllerAddr = "controller:9093"
 	sessionIDHeader       = "x-demo-session-id"
+
+	// controllerStreamKey is the RequestContext data key holding the controller
+	// bidi stream handle for the current exchange phase.
+	controllerStreamKey = "controllerDemoStream"
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -54,41 +61,79 @@ func (s *demoRequestProcessor) GetOptions() *extproc.ProcessingOptions {
 	return s.opts
 }
 
-// controllerStream returns the controller bidi stream, opening one lazily.
-func (s *demoRequestProcessor) controllerStream(ctx context.Context) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
-	if s.stream != nil {
-		return s.stream, nil
+// controllerStream returns the controller bidi stream for the current exchange
+// phase, reading it from the per-request context first and opening a fresh one
+// when absent. The handle is stored on the RequestContext (which persists across
+// phases of an exchange), scoping it to the exchange rather than the processor
+// instance.
+func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc.RequestContext) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
+	if v, err := rc.GetValue(controllerStreamKey); err == nil {
+		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
+			return st, nil
+		}
 	}
 	conn, err := grpc.NewClient(s.controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
-	s.conn = conn
 	client := v1.NewDemoProcessorServiceClient(conn)
 	st, err := client.Process(ctx)
 	if err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
+	rc.SetValue(controllerStreamKey, st)
+	s.conn = conn
 	s.stream = st
 	return st, nil
+}
+
+// retireStream closes and clears the controller stream handle held in the
+// request context. It must be called when a phase fails or the stream is
+// cancelled, so a dead stream is never reused by a later phase of the exchange.
+func (s *demoRequestProcessor) retireStream(rc *extproc.RequestContext) {
+	if v, err := rc.GetValue(controllerStreamKey); err == nil {
+		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
+			_ = st.CloseSend()
+		}
+	}
+	if s.conn != nil {
+		_ = s.conn.Close()
+	}
+	rc.SetValue(controllerStreamKey, nil)
+	s.conn = nil
+	s.stream = nil
 }
 
 // sendPhase sends a phase update carrying the phase snapshot to the controller
 // for the session and waits for the controller's decision. Returns the decision
 // (continue/cancel).
-func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, sessionID string, snapshot *v1.HttpSnapshot) (*v1.ProcessResponse, error) {
-	stream, err := s.controllerStream(ctx)
+func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, rc *extproc.RequestContext, sessionID string, snapshot *v1.HttpSnapshot) (*v1.ProcessResponse, error) {
+	stream, err := s.controllerStream(ctx, rc)
 	if err != nil {
 		return nil, err
 	}
 	if err = stream.Send(&v1.ProcessRequest{SessionId: sessionID, Phase: v1.Phase(phase), Snapshot: snapshot}); err != nil {
+		s.retireStream(rc)
 		return nil, err
 	}
 	dec, err := stream.Recv()
 	if err != nil {
+		s.retireStream(rc)
 		return nil, err
 	}
+	// Phase resolved (decision received); keep the controller stream handle in
+	// the request context so the next phase of the same exchange reuses it.
 	return dec, nil
+}
+
+// sendPhaseAndDecide sends a phase update carrying the phase snapshot to the
+// controller for the session and waits for the controller's decision. Returns
+// the decision (continue/cancel).
+func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
+	sessionID := s.sessionIDFor(headers)
+	snap := s.snapshot(rc, headers, body)
+	return s.sendPhase(ctx, phase, rc, sessionID, snap)
 }
 
 // sessionIDFor resolves the controller session id for an incoming phase from
@@ -162,14 +207,6 @@ func (s *demoRequestProcessor) snapshot(rc *extproc.RequestContext, headers extp
 		snap.Body = body
 	}
 	return snap
-}
-
-// sendPhaseAndDecide sends a phase update carrying the phase snapshot to the
-// controller for the session and waits for the controller's decision.
-func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
-	sessionID := s.sessionIDFor(headers)
-	snap := s.snapshot(rc, headers, body)
-	return s.sendPhase(ctx, phase, sessionID, snap)
 }
 
 // resolvePhase sends a phase update carrying the phase snapshot to the
@@ -263,6 +300,13 @@ func (s *demoRequestProcessor) ProcessRequestTrailers(ctx *extproc.RequestContex
 }
 
 func (s *demoRequestProcessor) ErrorHandler(ctx *extproc.RequestContext, phase int, err error) {
+	if status.Code(err) == codes.Canceled || errors.Is(err, context.Canceled) {
+		// Envoy tore the downstream down and cancelled the extproc stream; treat
+		// it as the cancellation signal for this exchange phase and clean up the
+		// controller stream handle held in the request context.
+		s.retireStream(ctx)
+		return
+	}
 	s.logger.Error("demo processor error",
 		slog.String("phase", extproc.RequestPhaseToString(phase)),
 		slog.String("error", err.Error()),

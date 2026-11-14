@@ -154,6 +154,53 @@ func TestSessionController_ResolveDecision_ReturnsCancelOnPhaseTimeout(t *testin
 	}
 }
 
+// TestSessionController_SubmitDecision_RejectsLateDecisionAfterResolution
+// asserts that a decision submitted after a phase already resolved (human
+// decision) is rejected, so late decisions cannot drive an already-resolved
+// phase.
+func TestSessionController_SubmitDecision_RejectsLateDecisionAfterResolution(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	if err = c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err != nil {
+		t.Fatalf("SubmitDecision() error = %v, want nil", err)
+	}
+	if err = c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err == nil {
+		t.Fatalf("SubmitDecision() error = nil, want %v", errSessionNotInFlight)
+	}
+}
+
+// TestSessionController_ResolveDecision_TimesOutMarksSessionResolved asserts
+// that a phase timeout marks the session resolved, so a late human decision can
+// no longer be accepted for the timed-out phase.
+func TestSessionController_ResolveDecision_TimesOutMarksSessionResolved(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	oldTimeout := PhaseTimeout
+	PhaseTimeout = 50 * time.Millisecond
+	defer func() { PhaseTimeout = oldTimeout }()
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+	if _, err := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("ResolveDecision() error = %v, want nil", err)
+	}
+	if s.Status != SessionStatusResolved {
+		t.Fatalf("ResolveDecision() status = %v, want %v", s.Status, SessionStatusResolved)
+	}
+	if err = c.SubmitDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Headers: map[string]string{}}}}); err == nil {
+		t.Fatalf("SubmitDecision() error = nil, want %v", errSessionNotInFlight)
+	}
+}
+
 func TestSessionController_ResolveDecision_RejectsWhenNotInFlight(t *testing.T) {
 	c := NewSessionController()
 	s, err := c.CreateSession()
