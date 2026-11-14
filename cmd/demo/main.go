@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
@@ -33,9 +34,13 @@ type demoRequestProcessor struct {
 	opts   *extproc.ProcessingOptions
 	logger *slog.Logger
 
-	conn      *grpc.ClientConn
+	// controllerConn is the single controller client connection shared by all
+	// exchanges. Stream handles are held per exchange in the request context and
+	// retired individually; the connection itself is shared, not per exchange.
+	controllerMu   sync.Mutex
+	controllerConn *grpc.ClientConn
+
 	sessionID string
-	stream    grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]
 
 	controllerAddr string
 }
@@ -61,48 +66,52 @@ func (s *demoRequestProcessor) GetOptions() *extproc.ProcessingOptions {
 	return s.opts
 }
 
+// controllerClient returns the shared controller client connection, opening it
+// lazily on first use.
+func (s *demoRequestProcessor) controllerClient() (*grpc.ClientConn, error) {
+	s.controllerMu.Lock()
+	defer s.controllerMu.Unlock()
+	if s.controllerConn != nil {
+		return s.controllerConn, nil
+	}
+	conn, err := grpc.NewClient(s.controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, err
+	}
+	s.controllerConn = conn
+	return conn, nil
+}
+
 // controllerStream returns the controller bidi stream for the current exchange
 // phase, reading it from the per-request context first and opening a fresh one
 // when absent. The handle is stored on the RequestContext (which persists across
 // phases of an exchange), scoping it to the exchange rather than the processor
-// instance.
+// instance. The underlying connection is the shared controller connection.
 func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc.RequestContext) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
-	if v, err := rc.GetValue(controllerStreamKey); err == nil {
-		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
-			return st, nil
-		}
-	}
-	conn, err := grpc.NewClient(s.controllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := s.controllerClient()
 	if err != nil {
 		return nil, err
 	}
 	client := v1.NewDemoProcessorServiceClient(conn)
 	st, err := client.Process(ctx)
 	if err != nil {
-		_ = conn.Close()
 		return nil, err
 	}
 	rc.SetValue(controllerStreamKey, st)
-	s.conn = conn
-	s.stream = st
 	return st, nil
 }
 
 // retireStream closes and clears the controller stream handle held in the
-// request context. It must be called when a phase fails or the stream is
-// cancelled, so a dead stream is never reused by a later phase of the exchange.
+// request context. It must be called when a phase fails or the phase has ended
+// (end-of-stream) after a decision, so a dead stream is never reused by a later
+// phase of the exchange and a resolved exchange does not leave the stream open.
 func (s *demoRequestProcessor) retireStream(rc *extproc.RequestContext) {
 	if v, err := rc.GetValue(controllerStreamKey); err == nil {
 		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
 			_ = st.CloseSend()
 		}
 	}
-	if s.conn != nil {
-		_ = s.conn.Close()
-	}
 	rc.SetValue(controllerStreamKey, nil)
-	s.conn = nil
-	s.stream = nil
 }
 
 // sendPhase sends a phase update carrying the phase snapshot to the controller
@@ -122,8 +131,13 @@ func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, rc *e
 		s.retireStream(rc)
 		return nil, err
 	}
-	// Phase resolved (decision received); keep the controller stream handle in
-	// the request context so the next phase of the same exchange reuses it.
+	// Phase resolved (decision received); retire the controller stream when the
+	// phase signaled end-of-stream, closing the exchange. Otherwise keep the
+	// handle in the request context so the next phase of the same exchange
+	// reuses it.
+	if rc.EndOfStream {
+		s.retireStream(rc)
+	}
 	return dec, nil
 }
 
@@ -314,6 +328,11 @@ func (s *demoRequestProcessor) ErrorHandler(ctx *extproc.RequestContext, phase i
 }
 
 func (s *demoRequestProcessor) Close(gracePeriodSeconds int32) error {
+	s.controllerMu.Lock()
+	defer s.controllerMu.Unlock()
+	if s.controllerConn != nil {
+		return s.controllerConn.Close()
+	}
 	return nil
 }
 
