@@ -51,7 +51,7 @@ services:
 
   # extproc, integrated with envoy and holds requests for interactive handling
   extproc:
-    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-extproc:${DEMO_VERSION:-local}
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-extproc:${EXTPROC_VERSION:-local}
     build:
       context: .
       dockerfile: Dockerfile
