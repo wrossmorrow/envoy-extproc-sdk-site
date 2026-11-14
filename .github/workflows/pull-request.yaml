@@ -21,7 +21,7 @@ jobs:
       - name: Check image builds
         run: |
           docker build --build-arg CMD=controller .
-          docker build --build-arg CMD=demo .
+          docker build --build-arg CMD=extproc .
   vet-check:
     runs-on: ubuntu-latest
     steps:
