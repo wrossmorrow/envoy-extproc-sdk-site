@@ -50,7 +50,6 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	// Start demo extproc server (processor side of the Process bidi).
 	proc := newDemoRequestProcessor()
 	proc.controllerAddr = ctrlAddr
-	proc.sessionID = sessID
 	sopts := &extproc.ServerOptions{ExtProcPort: 50053, MetricsHTTPPort: 9099, TerminationGracePeriodSeconds: 10}
 	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
 	time.Sleep(700 * time.Millisecond)
@@ -69,7 +68,7 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	req := &epb.ProcessingRequest{
 		Request: &epb.ProcessingRequest_RequestHeaders{
 			RequestHeaders: &epb.HttpHeaders{
-				Headers:     &corev3.HeaderMap{},
+				Headers:     &corev3.HeaderMap{Headers: []*corev3.HeaderValue{{Key: "x-demo-session-id", Value: sessID}}},
 				EndOfStream: true,
 			},
 		},
@@ -123,7 +122,6 @@ func TestDemoProcessorAppliesCancelDecision(t *testing.T) {
 
 	proc := newDemoRequestProcessor()
 	proc.controllerAddr = ctrlAddr
-	proc.sessionID = sess.ID
 	sopts := &extproc.ServerOptions{ExtProcPort: 50055, MetricsHTTPPort: 9098, TerminationGracePeriodSeconds: 10}
 	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
 	time.Sleep(700 * time.Millisecond)
@@ -141,7 +139,7 @@ func TestDemoProcessorAppliesCancelDecision(t *testing.T) {
 	req := &epb.ProcessingRequest{
 		Request: &epb.ProcessingRequest_RequestHeaders{
 			RequestHeaders: &epb.HttpHeaders{
-				Headers:     &corev3.HeaderMap{},
+				Headers:     &corev3.HeaderMap{Headers: []*corev3.HeaderValue{{Key: "x-demo-session-id", Value: sess.ID}}},
 				EndOfStream: true,
 			},
 		},

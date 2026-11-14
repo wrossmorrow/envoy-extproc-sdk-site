@@ -35,8 +35,9 @@ const (
 	// session id for the current exchange phase.
 	controllerSessionIDKey = "controllerDemoSessionID"
 
-	// defaultExchangeTimeout bounds a single controller exchange phase stream.
-	defaultExchangeTimeout = 30 * time.Second
+	// defaultExchangeTimeout bounds a single controller exchange phase stream (the
+	// per-exchange budget across the exchange's phases).
+	defaultExchangeTimeout = 5 * time.Minute
 )
 
 // demoRequestProcessor is the demo extproc processor. It drives the controller's
@@ -52,10 +53,9 @@ type demoRequestProcessor struct {
 	controllerMu   sync.Mutex
 	controllerConn *grpc.ClientConn
 
-	// exchangeTimeout bounds a single controller exchange phase stream.
+	// exchangeTimeout bounds a single controller exchange phase stream (the
+	// per-exchange budget across the exchange's phases).
 	exchangeTimeout time.Duration
-
-	sessionID string
 
 	controllerAddr string
 }
@@ -68,7 +68,6 @@ func newDemoRequestProcessor() *demoRequestProcessor {
 	return &demoRequestProcessor{
 		opts:            &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
 		logger:          slog.Default(),
-		sessionID:       "",
 		controllerAddr:  addr,
 		exchangeTimeout: defaultExchangeTimeout,
 	}
@@ -104,6 +103,11 @@ func (s *demoRequestProcessor) controllerClient() (*grpc.ClientConn, error) {
 // phases of an exchange), scoping it to the exchange rather than the processor
 // instance. The underlying connection is the shared controller connection.
 func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc.RequestContext) (grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse], error) {
+	if v, err := rc.GetValue(controllerStreamKey); err == nil {
+		if st, ok := v.(grpc.BidiStreamingClient[v1.ProcessRequest, v1.ProcessResponse]); ok {
+			return st, nil
+		}
+	}
 	conn, err := s.controllerClient()
 	if err != nil {
 		return nil, err
@@ -123,9 +127,10 @@ func (s *demoRequestProcessor) controllerStream(ctx context.Context, rc *extproc
 }
 
 // retireStream closes and clears the controller stream handle held in the
-// request context. It must be called when a phase fails or the phase has ended
-// (end-of-stream) after a decision, so a dead stream is never reused by a later
-// phase of the exchange and a resolved exchange does not leave the stream open.
+// request context. It must be called when a phase fails or the phase signaled
+// end-of-stream during a response phase after a decision, so a dead stream is
+// never reused by a later phase of the exchange and a resolved exchange does not
+// leave the stream open.
 // Closing the send direction and cancelling the stream context releases the
 // exchange phase stream.
 func (s *demoRequestProcessor) retireStream(rc *extproc.RequestContext) {
@@ -161,13 +166,22 @@ func (s *demoRequestProcessor) sendPhase(ctx context.Context, phase int32, rc *e
 		return nil, err
 	}
 	// Phase resolved (decision received); retire the controller stream when the
-	// phase signaled end-of-stream, closing the exchange. Otherwise keep the
-	// handle in the request context so the next phase of the same exchange
-	// reuses it.
-	if rc.EndOfStream {
+	// phase signaled end-of-stream and this was a response phase, closing the
+	// exchange. End-of-stream marks the end of a single direction (e.g. request
+	// headers for a bodyless GET), not the end of the exchange, so only retire for
+	// response phases. Otherwise keep the handle in the request context so the
+	// next phase of the same exchange reuses it.
+	if rc.EndOfStream && isResponsePhase(phase) {
 		s.retireStream(rc)
 	}
 	return dec, nil
+}
+
+// isResponsePhase reports whether the extproc phase is a response phase. Only
+// response phases (headers/body/trailers) mark the end of the direction the demo
+// retires on, so end-of-stream is only honored for them.
+func isResponsePhase(phase int32) bool {
+	return phase >= extproc.REQUEST_PHASE_RESPONSE_HEADERS && phase <= extproc.REQUEST_PHASE_RESPONSE_TRAILERS
 }
 
 // sendPhaseAndDecide sends a phase update carrying the phase snapshot to the
@@ -180,9 +194,8 @@ func (s *demoRequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int
 }
 
 // sessionIDFor resolves the controller session id for an incoming phase from
-// the request context (falling back to the request headers, then the stored
-// session id when absent). Resolution is per request context, so concurrent
-// exchanges do not clobber each other.
+// the request context (falling back to the request headers). Resolution is per
+// request context, so concurrent exchanges do not clobber each other.
 func (s *demoRequestProcessor) sessionIDFor(rc *extproc.RequestContext, headers extproc.AllHeaders) string {
 	if id, err := rc.GetValue(controllerSessionIDKey); err == nil {
 		if sid, ok := id.(string); ok && sid != "" {
@@ -193,7 +206,7 @@ func (s *demoRequestProcessor) sessionIDFor(rc *extproc.RequestContext, headers 
 		rc.SetValue(controllerSessionIDKey, id)
 		return id
 	}
-	return s.sessionID
+	return ""
 }
 
 const snapshotBodyLimit = 16 * 1024 // cap on bodies reported in phase snapshots
@@ -296,6 +309,9 @@ func (s *demoRequestProcessor) resolvePhase(ctx context.Context, phase int32, rc
 	}
 	if decision.GetCancel() != nil {
 		cancel := decision.GetCancel()
+		// A cancel ends the exchange, so retire the controller phase stream before
+		// surfacing the cancellation to the phase context.
+		s.retireStream(rc)
 		return rc.CancelRequest(cancel.GetStatus(), extproc.BuildHeaderValuesFromMap(cancel.GetHeaders()), cancel.GetBody())
 	}
 	return nil

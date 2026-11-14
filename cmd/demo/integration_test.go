@@ -83,7 +83,6 @@ func newFlowEnv(t *testing.T, extProcPort, metricsPort int) *flowEnv {
 
 	proc := newDemoRequestProcessor()
 	proc.controllerAddr = env.grpcAddr
-	proc.sessionID = ""
 	demoConn, err := grpc.NewClient(
 		fmt.Sprintf("127.0.0.1:%d", extProcPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
