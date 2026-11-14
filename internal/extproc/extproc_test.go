@@ -1,4 +1,4 @@
-package main
+package extproc
 
 import (
 	"context"
@@ -48,8 +48,7 @@ func TestDemoProcessorSendsPhaseAndAppliesDecision(t *testing.T) {
 	}
 
 	// Start demo extproc server (processor side of the Process bidi).
-	proc := newDemoRequestProcessor()
-	proc.controllerAddr = ctrlAddr
+	proc := NewRequestProcessor(ctrlAddr)
 	sopts := &extproc.ServerOptions{ExtProcPort: 50053, MetricsHTTPPort: 9099, TerminationGracePeriodSeconds: 10}
 	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
 	time.Sleep(700 * time.Millisecond)
@@ -120,8 +119,7 @@ func TestDemoProcessorAppliesCancelDecision(t *testing.T) {
 		t.Fatalf("begin phase: %v", err)
 	}
 
-	proc := newDemoRequestProcessor()
-	proc.controllerAddr = ctrlAddr
+	proc := NewRequestProcessor(ctrlAddr)
 	sopts := &extproc.ServerOptions{ExtProcPort: 50055, MetricsHTTPPort: 9098, TerminationGracePeriodSeconds: 10}
 	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
 	time.Sleep(700 * time.Millisecond)
