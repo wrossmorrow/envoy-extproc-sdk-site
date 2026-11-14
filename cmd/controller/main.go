@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	extproc "github.com/wrossmorrow/envoy-extproc-sdk-go"
 	"google.golang.org/grpc"
 	hpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -48,6 +49,10 @@ func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 	mux.Handle(controllerPath, controllerHandler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		handler := promhttp.HandlerFor(controller.MetricsRegistry(), promhttp.HandlerOpts{EnableOpenMetrics: true})
+		handler.ServeHTTP(w, r)
 	})
 	mux.Handle("/envoy/", &httputil.ReverseProxy{
 		Director: func(req *http.Request) {

@@ -62,6 +62,8 @@ type DemoProcessorGRPCServer struct {
 // decisions back.
 func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.ProcessRequest, v1.ProcessResponse]) error {
 	ctx := stream.Context()
+	demoControllerProcessStreamsOpen.Inc()
+	defer func() { demoControllerProcessStreamsOpen.Dec() }()
 	for {
 		update, err := stream.Recv()
 		if err != nil {

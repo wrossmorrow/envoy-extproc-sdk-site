@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
@@ -62,6 +64,36 @@ var (
 	errSessionTimedOut    = errors.New("session timed out")
 )
 
+// Logical metrics for the demo controller's session and phase handling. The
+// controller tracks how many sessions are open, how many phases are awaiting a
+// human decision, and how many controller<->extproc process streams are open.
+var (
+	demoControllerSessionsActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "demo_controller_sessions_active",
+		Help: "Current number of demo controller sessions open.",
+	})
+	demoControllerPhasesPending = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "demo_controller_phases_pending",
+		Help: "Current number of demo controller phases awaiting a human decision.",
+	})
+	demoControllerProcessStreamsOpen = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "demo_controller_process_streams_open",
+		Help: "Current number of open demo controller process streams.",
+	})
+
+	demoControllerMetrics = func() *prometheus.Registry {
+		reg := prometheus.NewRegistry()
+		reg.MustRegister(demoControllerSessionsActive, demoControllerPhasesPending, demoControllerProcessStreamsOpen)
+		return reg
+	}()
+)
+
+// MetricsRegistry returns the Prometheus registry backing the demo controller's
+// logical metrics.
+func MetricsRegistry() *prometheus.Registry {
+	return demoControllerMetrics
+}
+
 func NewSessionController() *SessionController {
 	return &SessionController{sessions: map[string]*Session{}}
 }
@@ -69,6 +101,7 @@ func NewSessionController() *SessionController {
 func (c *SessionController) CreateSession() (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	demoControllerSessionsActive.Inc()
 	s := &Session{
 		ID:            newSessionID(),
 		Status:        SessionStatusNew,
@@ -126,6 +159,7 @@ func (c *SessionController) removeSession(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.sessions, id)
+	demoControllerSessionsActive.Dec()
 }
 
 func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, decision *v1.Decision) error {
@@ -219,8 +253,10 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 	c.mu.Unlock()
 	select {
 	case res := <-s.Pending.Ch:
+		demoControllerPhasesPending.Dec()
 		return decisionResponse(s, phase, res.decision), nil
 	case <-ctx.Done():
+		demoControllerPhasesPending.Dec()
 		return nil, ctx.Err()
 	case <-time.After(time.Until(s.PhaseDeadline)):
 		// Phase timed out: fail closed and mark the session resolved so a late
@@ -230,6 +266,7 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 		s.Status = SessionStatusResolved
 		s.Pending = nil
 		c.mu.Unlock()
+		demoControllerPhasesPending.Dec()
 		return decisionResponse(s, phase, nil), nil
 	}
 }
@@ -284,6 +321,7 @@ func (c *SessionController) BeginPhase(id string, phase int32) error {
 		return errSessionNotFound
 	}
 	s.Status = SessionStatusInFlight
+	demoControllerPhasesPending.Inc()
 	s.Phase = phase
 	s.PhaseDeadline = time.Now().Add(PhaseTimeout)
 	if s.Pending == nil {
