@@ -473,10 +473,13 @@ func TestSessionController_ResolveConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() error = %v, want nil", err)
 	}
-	if updated.Status != SessionStatusResolved {
-		t.Fatalf("ResolveConflict() Status = %v, want %v", updated.Status, SessionStatusResolved)
+	if updated.Status != SessionStatusInFlight {
+		t.Fatalf("ResolveConflict() Status = %v, want %v", updated.Status, SessionStatusInFlight)
 	}
-	if inFlight, err := c.SessionInFlight(s.ID); err != nil || inFlight {
-		t.Fatalf("SessionInFlight() = %v, %v; want false, nil after conflict", inFlight, err)
+	if updated.Pending == nil {
+		t.Fatalf("ResolveConflict() Pending = nil, want pending decision preserved: %v", updated.Pending)
+	}
+	if inFlight, err := c.SessionInFlight(s.ID); err != nil || !inFlight {
+		t.Fatalf("SessionInFlight() = %v, %v; want true, nil after conflict", inFlight, err)
 	}
 }

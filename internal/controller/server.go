@@ -239,8 +239,8 @@ func (c *SessionController) SessionInFlight(id string) (bool, error) {
 }
 
 // ResolveConflict answers a phase update that arrives for a session already in
-// flight with a 409 conflict decision and marks the session resolved so the
-// in-flight exchange cannot accept further decisions.
+// flight with a 409 conflict decision, leaving the in-flight exchange and its
+// pending human decision untouched so the session remains usable.
 func (c *SessionController) ResolveConflict(sessionID string, phase int32) (*v1.ProcessResponse, error) {
 	c.mu.Lock()
 	s, ok := c.sessions[sessionID]
@@ -249,13 +249,7 @@ func (c *SessionController) ResolveConflict(sessionID string, phase int32) (*v1.
 		return nil, errSessionNotFound
 	}
 	conflict := &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusConflict, Headers: map[string]string{}}}}
-	resp := decisionResponse(s, phase, conflict)
-	c.mu.Lock()
-	s.Status = SessionStatusResolved
-	s.Pending = nil
-	c.mu.Unlock()
-	demoControllerPhasesPending.Dec()
-	return resp, nil
+	return decisionResponse(s, phase, conflict), nil
 }
 
 // ResolveDecision resolves the decision for a session phase and returns the
