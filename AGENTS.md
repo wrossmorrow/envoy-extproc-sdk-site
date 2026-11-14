@@ -3,16 +3,16 @@
 ## Layout
 - `proto/` is the only place `.proto` files live.
 - `gen/go/` holds generated code only. Regenerate with `just gen`; never edit it by hand.
-- `internal/demo` and `cmd/demo`: envoy external processor, implements a client for `DemoProcessor`
+- `internal/extproc` and `cmd/extproc`: envoy external processor, implements a client for `DemoProcessor`
 - `internal/controller/` and `cmd/controller`: connectrpc server for `DemoController`, gRPC server for `DemoProcessor`
-- `*/demo` code should **not** import `controller` code except for testing routines
+- `*/extproc` code should **not** import `controller` code except for testing routines
 
 ## Contracts
 - Services talk only through the protos in `proto/`; no shared Go packages across services
   except `gen/go`.
-- `rpc DemoProcessor.Process` (bidi streaming): `demo/` implementation opens bidi stream, `controller/` handles and responds. 
-- `rpc DemoController.CreateSession` (server-side streaming): browser/user opens, `controller/` implementation handles
-- `rpc DemoController.SubmitDecision` (unary): browser/user sends, `controller/` implementation handles
+- `rpc DemoProcessor.Process` (bidi streaming): `extproc` implementation opens bidi stream, `controller` handles and responds. 
+- `rpc DemoController.CreateSession` (server-side streaming): browser/user opens, `controller` implementation handles
+- `rpc DemoController.SubmitDecision` (unary): browser/user sends, `controller` implementation handles
 
 ## Changes
 - New RPCs, messages or services: propose the .proto change first and wait for approval
