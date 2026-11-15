@@ -398,3 +398,107 @@ impl RequestProcessor for DemoRequestProcessor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_response_phase() {
+        assert!(is_response_phase(RequestPhase::ResponseHeaders));
+        assert!(is_response_phase(RequestPhase::ResponseBody));
+        assert!(is_response_phase(RequestPhase::ResponseTrailers));
+        assert!(!is_response_phase(RequestPhase::RequestHeaders));
+        assert!(!is_response_phase(RequestPhase::RequestBody));
+        assert!(!is_response_phase(RequestPhase::RequestTrailers));
+        assert!(!is_response_phase(RequestPhase::Undetermined));
+    }
+
+    #[test]
+    fn test_is_masked() {
+        assert!(is_masked("cookie"));
+        assert!(is_masked("set-cookie"));
+        assert!(is_masked("authorization"));
+        assert!(!is_masked("x-demo-session-id"));
+        assert!(!is_masked("content-type"));
+    }
+
+    fn all_headers(entries: &[(&str, &str)]) -> AllHeaders {
+        let mut headers = AllHeaders::default();
+        for (key, value) in entries {
+            headers
+                .headers
+                .insert(key.to_lowercase(), vec![value.to_string()]);
+            headers
+                .raw_headers
+                .insert(key.to_lowercase(), vec![value.as_bytes().to_vec()]);
+        }
+        headers
+    }
+
+    #[test]
+    fn test_snapshot_captures_status_and_body() {
+        let processor = DemoRequestProcessor::new("controller:9093");
+        let ctx = RequestContext::new();
+        let headers = all_headers(&[(":method", "GET"), (":path", "/foo")]);
+        let snapshot = processor.snapshot(&ctx, &headers, Some(b"hello"));
+        assert_eq!(snapshot.status, 0);
+        assert_eq!(snapshot.body.as_slice(), b"hello".as_slice());
+        assert!(!snapshot.body_truncated);
+        assert_eq!(snapshot.headers.len(), 2);
+    }
+
+    #[test]
+    fn test_snapshot_masks_and_sorts_headers() {
+        let processor = DemoRequestProcessor::new("controller:9093");
+        let ctx = RequestContext::new();
+        let headers = all_headers(&[
+            (":method", "POST"),
+            (":path", "/foo"),
+            ("authorization", "Bearer secret"),
+        ]);
+        let snapshot = processor.snapshot(&ctx, &headers, None);
+        assert_eq!(snapshot.headers.len(), 3);
+        // Sorted by key, and masked values are redacted rather than stored raw.
+        assert_eq!(snapshot.headers[0].key, ":method");
+        assert_eq!(snapshot.headers[1].key, ":path");
+        assert_eq!(snapshot.headers[2].key, "authorization");
+        assert_eq!(snapshot.headers[2].value, "[redacted 13 chars]");
+        assert_eq!(snapshot.body, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_snapshot_truncates_oversized_bodies() {
+        let processor = DemoRequestProcessor::new("controller:9093");
+        let ctx = RequestContext::new();
+        let headers = AllHeaders::default();
+        let body = vec![0u8; SNAPSHOT_BODY_LIMIT + 1];
+        let snapshot = processor.snapshot(&ctx, &headers, Some(&body));
+        assert_eq!(snapshot.body.len(), SNAPSHOT_BODY_LIMIT);
+        assert!(snapshot.body_truncated);
+    }
+
+    #[test]
+    fn test_session_id_from_context_value() {
+        let processor = DemoRequestProcessor::new("controller:9093");
+        let mut ctx = RequestContext::new();
+        assert_eq!(
+            processor.session_id_for(&mut ctx, &AllHeaders::default()),
+            ""
+        );
+        ctx.set_value::<String>("sess-1".to_string())
+            .expect("failed to store controller session id");
+        assert_eq!(
+            processor.session_id_for(&mut ctx, &AllHeaders::default()),
+            "sess-1"
+        );
+    }
+
+    #[test]
+    fn test_session_id_from_headers() {
+        let processor = DemoRequestProcessor::new("controller:9093");
+        let mut ctx = RequestContext::new();
+        let headers = all_headers(&[("x-demo-session-id", "sess-2")]);
+        assert_eq!(processor.session_id_for(&mut ctx, &headers), "sess-2");
+    }
+}
