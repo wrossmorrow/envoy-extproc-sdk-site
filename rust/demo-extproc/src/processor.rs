@@ -101,7 +101,7 @@ impl DemoRequestProcessor {
                 .tx
                 .send(ProcessRequest {
                     session_id,
-                    phase: phase as i32,
+                    phase: controller_phase(phase),
                     snapshot: Some(snapshot),
                 })
                 .await
@@ -300,6 +300,23 @@ fn is_response_phase(phase: RequestPhase) -> bool {
 /// authorization).
 fn is_masked(name: &str) -> bool {
     matches!(name, "cookie" | "set-cookie" | "authorization")
+}
+
+/// Translate the Rust SDK phase to the phase number the controller expects in
+/// the `ProcessRequest.phase` field. The controller (and envoy) number phases
+/// starting at `NotStarted` for the pre-request phases, while the Rust SDK
+/// numbers phases starting at the request phases, so the SDK discriminant is
+/// mapped onto the controller's phase numbering before it is sent.
+fn controller_phase(phase: RequestPhase) -> i32 {
+    match phase {
+        RequestPhase::Undetermined => 0,
+        RequestPhase::RequestHeaders => 2,
+        RequestPhase::RequestBody => 3,
+        RequestPhase::RequestTrailers => 4,
+        RequestPhase::ResponseHeaders => 5,
+        RequestPhase::ResponseBody => 6,
+        RequestPhase::ResponseTrailers => 7,
+    }
 }
 
 #[async_trait]
@@ -501,4 +518,15 @@ mod tests {
         let headers = all_headers(&[("x-demo-session-id", "sess-2")]);
         assert_eq!(processor.session_id_for(&mut ctx, &headers), "sess-2");
     }
+}
+
+#[test]
+fn test_controller_phase_maps_sdk_phases() {
+    assert_eq!(controller_phase(RequestPhase::Undetermined), 0);
+    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 2);
+    assert_eq!(controller_phase(RequestPhase::RequestBody), 3);
+    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 4);
+    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 5);
+    assert_eq!(controller_phase(RequestPhase::ResponseBody), 6);
+    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 7);
 }
