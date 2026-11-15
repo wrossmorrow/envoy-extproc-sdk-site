@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [build-dependencies]
 tonic-prost = "0.14"
+tonic-prost-build = "0.14"
 prost-build = "0.14"
 
 [dependencies]
@@ -23,8 +24,10 @@ envoy_extproc_sdk = { package = "envoy_extproc_sdk", version = "0.2.0" }
 envoy-types = "0.7.7"
 prost = "0.14"
 prost-types = "0.14"
+tonic-prost = "0.14"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tonic = { version = "0.14", features = ["server", "transport", "codegen"] }
+async-trait = "0.1"
 
 [workspace]

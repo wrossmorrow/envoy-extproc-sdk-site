@@ -5,3 +5,11 @@ pub mod controller {
 }
 
 pub mod processor;
+
+pub use envoy_extproc_sdk::context::{
+    build_header_values_from_map, HeaderValue, RequestContext, RequestPhase,
+};
+pub use envoy_extproc_sdk::headers::AllHeaders;
+pub use envoy_extproc_sdk::{
+    Error, GenericExtProcServer, Metrics, ProcessingOptions, RequestProcessor, ServerOptions,
+};

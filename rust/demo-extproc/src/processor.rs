@@ -1,42 +1,42 @@
 //! Interactive demo extproc processor.
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use envoy_extproc_sdk::{
-    build_header_values_from_map, AllHeaders, Error, GenericExtProcServer, HeaderAppendAction,
-    HeaderValue, is_stream_cancelled, Metrics, ProcessingOptions, RequestContext, RequestPhase,
-    RequestProcessor, ServerOptions,
+use async_trait::async_trait;
+use envoy_extproc_sdk::context::{
+    build_header_values_from_map, HeaderValue, RequestContext, RequestPhase,
 };
-use envoy_types::pb::controller::v1::decision::Action;
-use envoy_types::pb::controller::v1::{Cancel, Continue, Decision, Header, HttpSnapshot, ProcessRequest, ProcessResponse};
-use envoy_types::pb::envoy::service::ext_proc::v3::ProcessingResponse;
-use envoy_types::pb::envoy::service::ext_proc::v3::ProcessingRequest;
-use envoy_types::pb::envoy::service::ext_proc::v3::external_processor_client::ExternalProcessorClient;
-use envoy_types::pb::envoy::service::ext_proc::v3::external_processor_server::ExternalProcessor;
-use envoy_types::pb::envoy::service::ext_proc::v3::external_processor_server::ExternalProcessorServer;
+use envoy_extproc_sdk::headers::AllHeaders;
+use envoy_extproc_sdk::{is_stream_cancelled, Error, ProcessingOptions, RequestProcessor};
 
+use crate::controller::v1::decision::Action;
+use crate::controller::v1::demo_processor_service_client::DemoProcessorServiceClient;
+use crate::controller::v1::{Decision, Header, HttpSnapshot, ProcessRequest, ProcessResponse};
 
 const SESSION_ID_HEADER: &str = "x-demo-session-id";
 const PROCESSED_HEADER: &str = "x-demo-processed";
 const SNAPSHOT_BODY_LIMIT: usize = 16 * 1024;
 const DEFAULT_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(300);
 
-#[derive(Clone, Debug, Default)]
-pub struct ControllerExchange {
-    pub stream: Option<ControllerStream>,
+/// Controller phase-stream handle for the current exchange, held in the
+/// request context so later phases of the same exchange reuse it.
+#[derive(Clone, Debug)]
+pub struct ControllerPhaseStream {
+    pub tx: tokio::sync::mpsc::Sender<ProcessRequest>,
+    pub response: std::sync::Arc<tokio::sync::Mutex<tonic::codec::Streaming<ProcessResponse>>>,
 }
 
-#[derive(Clone)]
-pub struct ControllerStream {
-    pub tx: tokio::sync::mpsc::UnboundedSender<ProcessRequest>,
-    pub response: std::sync::Arc<tokio::sync::Mutex<tonic::codec::Streaming<ProcessResponse>>>,
+#[derive(Clone, Debug)]
+pub struct ControllerExchange {
+    pub stream: Option<ControllerPhaseStream>,
 }
 
 pub struct DemoRequestProcessor {
     controller_addr: String,
     options: ProcessingOptions,
-    controller: Arc<tokio::sync::Mutex<Option<tonic::client::Grpc<tonic::transport::Channel>>>>,
+    exchange_timeout: Duration,
+    controller:
+        std::sync::Arc<tokio::sync::Mutex<Option<tonic::client::Grpc<tonic::transport::Channel>>>>,
 }
 
 impl DemoRequestProcessor {
@@ -47,26 +47,354 @@ impl DemoRequestProcessor {
                 abort_on_processor_failure: true,
                 ..Default::default()
             },
-            controller: Arc::new(tokio::sync::Mutex::new(None)),
+            exchange_timeout: DEFAULT_EXCHANGE_TIMEOUT,
+            controller: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+
+    /// Return the controller phase stream for the current exchange, opening a
+    /// fresh one when the request context has none. The handle is stored in the
+    /// request context (which persists across phases of an exchange), scoping it
+    /// to the exchange rather than the processor instance. The underlying
+    /// controller connection is shared, not per exchange.
+    async fn controller_stream(
+        &self,
+        ctx: &mut RequestContext,
+    ) -> Result<Option<ControllerPhaseStream>, Error> {
+        if let Ok(Some(handle)) = ctx.get_value::<Option<ControllerPhaseStream>>() {
+            return Ok(Some(handle.clone()));
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let mut client = DemoProcessorServiceClient::connect(self.controller_addr.clone())
+            .await
+            .map_err(|e| format!("failed to connect to controller: {}", e))?;
+        let response = client
+            .process(tokio_stream::wrappers::ReceiverStream::new(rx))
+            .await
+            .map_err(Error::from)?
+            .into_inner();
+        let handle = ControllerPhaseStream {
+            tx,
+            response: std::sync::Arc::new(tokio::sync::Mutex::new(response)),
+        };
+        ctx.set_value::<Option<ControllerPhaseStream>>(Some(handle.clone()))?;
+        Ok(Some(handle))
+    }
+
+    /// Send a phase update carrying the phase snapshot to the controller for
+    /// the session and wait for the controller's decision. Returns the decision
+    /// (continue/cancel), if any.
+    async fn send_phase_and_decide(
+        &self,
+        ctx: &mut RequestContext,
+        phase: RequestPhase,
+        session_id: String,
+        snapshot: HttpSnapshot,
+    ) -> Result<Option<Decision>, Error> {
+        let handle = self.controller_stream(ctx).await?;
+        let handle = match handle {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+        let outcome = tokio::time::timeout(self.exchange_timeout, async {
+            handle
+                .tx
+                .send(ProcessRequest {
+                    session_id,
+                    phase: phase as i32,
+                    snapshot: Some(snapshot),
+                })
+                .await
+                .map_err(Error::from)?;
+            let mut response = handle.response.lock().await;
+            let maybe = response.message().await.map_err(|e| Error::from(e.clone()));
+            let decision = match maybe {
+                Ok(Some(resp)) => resp.decision,
+                _ => None,
+            };
+            Ok::<Option<Decision>, Error>(decision)
+        })
+        .await;
+        let decision: Option<Decision> = match outcome {
+            Ok(result) => result?,
+            Err(_elapsed) => {
+                return Err("timed out waiting for controller decision"
+                    .to_string()
+                    .into());
+            }
+        };
+        if ctx.end_of_stream && is_response_phase(phase) {
+            // The phase signaled end-of-stream during a response phase, which
+            // marks the end of the direction the demo retires on. End-of-stream
+            // marks the end of a single direction (e.g. request headers for a
+            // bodyless GET), not the end of the exchange, so retire only for
+            // response phases; otherwise keep the handle in the request context
+            // so the next phase of the same exchange reuses it.
+            self.retire_stream(ctx);
+        }
+        Ok(decision)
+    }
+
+    /// Clean up the controller phase-stream handle held in the request context.
+    /// Closing the send direction and dropping the response stream releases the
+    /// exchange phase stream.
+    fn retire_stream(&self, ctx: &mut RequestContext) {
+        ctx.set_value::<Option<ControllerPhaseStream>>(None)
+            .expect("failed to retire controller stream");
+    }
+
+    /// Resolve the session id for an incoming phase from the request context
+    /// (falling back to the request headers). Resolution is per request context,
+    /// so concurrent exchanges do not clobber each other.
+    fn session_id_for(&self, ctx: &mut RequestContext, headers: &AllHeaders) -> String {
+        if let Ok(session_id) = ctx.get_value::<String>() {
+            if !session_id.is_empty() {
+                return session_id.clone();
+            }
+        }
+        if let Some(id) = headers.get(SESSION_ID_HEADER) {
+            if !id.is_empty() {
+                ctx.set_value::<String>(id.clone())
+                    .expect("failed to store controller session id");
+                return id.clone();
+            }
+        }
+        String::new()
+    }
+
+    /// Build the HttpSnapshot the demo processor reports to the controller for
+    /// the phase being processed, from the observed headers and body. Body
+    /// phases report at most SNAPSHOT_BODY_LIMIT bytes; longer bodies are
+    /// truncated and flagged via body_truncated. Response phases surface the
+    /// response status via the ":status" header the data plane sends
+    /// downstream. Headers are emitted in sorted key order for deterministic
+    /// snapshots.
+    fn snapshot(
+        &self,
+        ctx: &RequestContext,
+        headers: &AllHeaders,
+        body: Option<&[u8]>,
+    ) -> HttpSnapshot {
+        let mut snapshot = HttpSnapshot {
+            headers: Vec::new(),
+            body: Vec::new(),
+            body_truncated: false,
+            status: 0,
+        };
+        let mut names: Vec<&String> = headers.headers.keys().collect();
+        names.sort();
+        for name in names {
+            let Some(values) = headers.headers.get(name) else {
+                continue;
+            };
+            for value in values {
+                let value = if is_masked(name) {
+                    format!("[redacted {} chars]", value.len())
+                } else {
+                    value.clone()
+                };
+                snapshot.headers.push(Header {
+                    key: name.clone(),
+                    value,
+                });
+            }
+        }
+        if let Some(status) = headers.get(":status") {
+            if let Ok(code) = status.parse::<i32>() {
+                snapshot.status = code;
+            }
+        }
+        if !ctx.method.is_empty() && !snapshot.headers.iter().any(|h| h.key == ":method") {
+            snapshot.headers.push(Header {
+                key: ":method".to_string(),
+                value: ctx.method.clone(),
+            });
+        }
+        if !ctx.path.is_empty() && !snapshot.headers.iter().any(|h| h.key == ":path") {
+            snapshot.headers.push(Header {
+                key: ":path".to_string(),
+                value: ctx.path.clone(),
+            });
+        }
+        if let Some(body) = body {
+            if body.len() > SNAPSHOT_BODY_LIMIT {
+                snapshot.body = body[..SNAPSHOT_BODY_LIMIT].to_vec();
+                snapshot.body_truncated = true;
+            } else {
+                snapshot.body = body.to_vec();
+            }
+        }
+        snapshot
+    }
+
+    /// Send a phase update carrying the phase snapshot to the controller for
+    /// the session and apply the controller's decision (continue mutations or
+    /// cancel) to the phase context. Returns any error from sending the phase
+    /// update or applying the decision.
+    async fn resolve_phase(
+        &self,
+        ctx: &mut RequestContext,
+        phase: RequestPhase,
+        headers: &AllHeaders,
+        body: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        let session_id = self.session_id_for(ctx, headers);
+        let snapshot = self.snapshot(ctx, headers, body);
+        let decision = self
+            .send_phase_and_decide(ctx, phase, session_id, snapshot)
+            .await?;
+        let Some(decision) = decision else {
+            // The controller closed the phase stream without a decision; the
+            // phase completes without one.
+            return Ok(());
+        };
+        if let Some(action) = decision.action {
+            match action {
+                Action::Continue(continue_decision) => {
+                    if !continue_decision.remove_headers.is_empty() {
+                        ctx.remove_headers(&continue_decision.remove_headers)?;
+                    }
+                    if let Some(body) = &continue_decision.body {
+                        ctx.replace_body(body)?;
+                    }
+                    let header_values = build_header_values_from_map(&continue_decision.headers);
+                    for (name, value) in header_values {
+                        ctx.overwrite_header(&name, &value)?;
+                    }
+                    ctx.add_header(
+                        PROCESSED_HEADER,
+                        &HeaderValue {
+                            value: "true".to_string(),
+                            raw_value: Some(b"true".to_vec()),
+                        },
+                    )?;
+                    ctx.continue_request()?;
+                }
+                Action::Cancel(cancel) => {
+                    // A cancel ends the exchange, so retire the controller phase
+                    // stream before surfacing the cancellation to the phase context.
+                    self.retire_stream(ctx);
+                    ctx.cancel_request(
+                        cancel.status,
+                        &build_header_values_from_map(&cancel.headers),
+                        cancel.body.as_bytes(),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether the given phase is a response phase. Only response phases (headers,
+/// body, trailers) mark the end of the direction the demo retires on, so
+/// end-of-stream is only honored for them.
+fn is_response_phase(phase: RequestPhase) -> bool {
+    matches!(
+        phase,
+        RequestPhase::ResponseHeaders | RequestPhase::ResponseBody | RequestPhase::ResponseTrailers
+    )
+}
+
+/// Whether a snapshot header value should be masked (cookie, set-cookie,
+/// authorization).
+fn is_masked(name: &str) -> bool {
+    matches!(name, "cookie" | "set-cookie" | "authorization")
+}
+
+#[async_trait]
+impl RequestProcessor for DemoRequestProcessor {
+    fn name(&self) -> String {
+        "demo".to_string()
     }
 
     fn options(&self) -> &ProcessingOptions {
         &self.options
     }
 
-    async fn controller_stream(
+    async fn process_request_headers(
         &self,
-    ) -> Result<(tokio::sync::mpsc::UnboundedSender<ProcessRequest>, tonic::codec::Streaming<ProcessResponse>), Error> {
-        let mut guard = self.controller.lock().await;
-        let channel = guard
-            .as_ref()
-            .map(|g| g.clone())
-            .map(|_| tonic::transport::Channel::default())
-            .unwrap_or_else(|| {
-                tonic::transport::Channel::default()
-            });
-        let _ = channel;
-        unreachable!()
+        ctx: &mut RequestContext,
+        headers: &AllHeaders,
+    ) -> Result<(), Error> {
+        self.resolve_phase(ctx, RequestPhase::RequestHeaders, headers, None)
+            .await
+    }
+
+    async fn process_request_body(
+        &self,
+        ctx: &mut RequestContext,
+        body: &[u8],
+    ) -> Result<(), Error> {
+        self.resolve_phase(
+            ctx,
+            RequestPhase::RequestBody,
+            &ctx.all_headers.clone(),
+            Some(body),
+        )
+        .await
+    }
+
+    async fn process_request_trailers(
+        &self,
+        ctx: &mut RequestContext,
+        trailers: &AllHeaders,
+    ) -> Result<(), Error> {
+        self.resolve_phase(ctx, RequestPhase::RequestTrailers, trailers, None)
+            .await
+    }
+
+    async fn process_response_headers(
+        &self,
+        ctx: &mut RequestContext,
+        headers: &AllHeaders,
+    ) -> Result<(), Error> {
+        self.resolve_phase(ctx, RequestPhase::ResponseHeaders, headers, None)
+            .await
+    }
+
+    async fn process_response_body(
+        &self,
+        ctx: &mut RequestContext,
+        body: &[u8],
+    ) -> Result<(), Error> {
+        self.resolve_phase(
+            ctx,
+            RequestPhase::ResponseBody,
+            &ctx.all_headers.clone(),
+            Some(body),
+        )
+        .await
+    }
+
+    async fn process_response_trailers(
+        &self,
+        ctx: &mut RequestContext,
+        trailers: &AllHeaders,
+    ) -> Result<(), Error> {
+        self.resolve_phase(ctx, RequestPhase::ResponseTrailers, trailers, None)
+            .await
+    }
+
+    async fn error_handler(&self, ctx: &mut RequestContext, _phase: RequestPhase, err: Error) {
+        if is_stream_cancelled(Some(&err)) {
+            // Envoy tore the downstream down and cancelled the extproc stream;
+            // treat it as the cancellation signal for this exchange phase and
+            // clean up the controller stream handle held in the request context.
+            self.retire_stream(ctx);
+            return;
+        }
+        // Surface the processing failure. The SDK aborts the stream when
+        // abort_on_processor_failure is set (the demo's default), so a failed
+        // phase fails the exchange closed rather than continuing.
+    }
+
+    fn close(&self, _grace_period_seconds: i32) -> Result<(), Error> {
+        // `close` is a synchronous trait method, so it cannot block the runtime
+        // thread; take the controller connection if it is free, else leave it.
+        if let Ok(mut guard) = self.controller.try_lock() {
+            *guard = None;
+        }
+        Ok(())
     }
 }

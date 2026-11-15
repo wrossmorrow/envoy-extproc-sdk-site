@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use demo_extproc::processor::DemoRequestProcessor;
-use demo_extproc::{Error, GenericExtProcServer, Metrics, ProcessingOptions, RequestProcessor, ServerOptions};
+use demo_extproc::{Error, GenericExtProcServer, Metrics, ProcessingOptions, ServerOptions};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
