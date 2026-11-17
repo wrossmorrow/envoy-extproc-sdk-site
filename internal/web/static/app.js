@@ -27,7 +27,7 @@ const TARGET_LANG_HEADER = "x-demo-target-lang";
 // Mirrors controller.PhaseTimeout; only used when updates carry no deadline.
 const FALLBACK_PHASE_TIMEOUT_MS = 30000;
 
-const AVAILABLE_LANGS = { go: true, rust: false, java: false, python: false };
+const AVAILABLE_LANGS = { go: true, rust: true, java: false, python: false };
 const LANG_NAMES = { go: "Go", rust: "Rust", java: "Java", python: "Python" };
 
 const PHASE_NOT_STARTED = "PHASE_NOT_STARTED";
