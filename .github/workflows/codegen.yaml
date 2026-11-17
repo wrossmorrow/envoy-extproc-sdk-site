@@ -4,6 +4,7 @@ on:
     paths:
       - 'proto/**'
       - 'gen/go/**'
+      - 'gen/rust/**'
       - 'buf.gen.yaml'
       - 'buf.yaml'
 jobs:
@@ -17,17 +18,21 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache-dependency-path: 'go.sum'
+      - name: Set up rust
+        uses: dtolnay/rust-toolchain@stable   # add
       - name: Set up Buf
         uses: bufbuild/buf-action@v1
         with:
           setup_only: true
+      - name: Install rust proto toolchain
+        run: cargo install --path rust/protoc-gen-tonic-prost   # add
       - name: Regenerate code
         run: |
           buf generate
           go mod tidy
       - name: Verify clean working directory
         run: |
-          if ! test -z "$(git status --porcelain gen/go)"; then
+          if ! test -z "$(git status --porcelain gen/go gen/rust)"; then
             echo "Error: gen/go is out of sync with proto/ definitions."
             echo "Run 'buf generate' locally and commit the changes."
             exit 1

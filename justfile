@@ -17,6 +17,24 @@ tidy:
 gen:
     buf generate
 
+# build the rust demo extproc
+rust-build:
+    cd rust/demo-extproc && cargo build
+
+# run the rust demo extproc unit tests
+rust-test:
+    cd rust/demo-extproc && cargo test
+
+# format the rust code
+rust-fmt:
+    cd rust/demo-extproc && cargo fmt
+    cd rust/protoc-gen-tonic-prost && cargo fmt
+
+# lint the rust code
+rust-lint:
+    cd rust/demo-extproc && cargo clippy --all-targets -- -D warnings
+    cd rust/protoc-gen-tonic-prost && cargo clippy --all-targets -- -D warnings
+
 # format code
 format:
     go fmt ./...
