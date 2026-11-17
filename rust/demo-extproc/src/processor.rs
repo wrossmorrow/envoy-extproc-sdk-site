@@ -88,10 +88,10 @@ impl DemoRequestProcessor {
             .await
             .map_err(|e| {
                 eprintln!(
-                    "[demo-extproc] failed to connect to controller at {}: {}",
+                    "[demo-extproc] failed to connect to controller at {}: {:?}",
                     self.controller_addr, e
                 );
-                format!("failed to connect to controller: {}", e)
+                format!("failed to connect to controller: {:?}", e)
             })?;
         let response = client
             .process(tokio_stream::wrappers::ReceiverStream::new(rx))
