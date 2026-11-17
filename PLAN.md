@@ -110,6 +110,57 @@ browser (static site, CloudFront) ──TLS──▶ ALB/CloudFront ──▶ En
   preferred design; folding the stream into `CreateSession` would mean client
   streaming and is not preferred.
 
+## Multi-language UI sessions (draft)
+
+> **Status: draft, not implemented.** Builds on the merged envoy draft
+> (PR #21: header-based `x-demo-target-lang` routing, default → Go).
+
+### Context
+
+The browser UI already has processor-implementation tabs (`Go`, `Rust`, `Java`,
+`Python`) driven by `state.lang` in `internal/web/static/app.js`, plus
+`AVAILABLE_LANGS` flags for which backends are deployed. Demo requests are
+envoy-bound with the language encoded in the path (`/{lang}/orders`) and the
+session id in the `x-demo-session-id` header.
+
+The merged envoy draft (PR #21) added header-based routing via
+`x-demo-target-lang` (default route → Go; `x-demo-target-lang: rust` → Rust
+cluster). The extproc resolves sessions by `x-demo-session-id`, so the language
+is a backend selector, not a session key.
+
+### Draft decisions
+
+1. **Lang header.** Every envoy-bound demo request sends the
+   `x-demo-target-lang` header set from the active tab (`state.lang`). The
+   path-encoded `/{lang}/...` prefix is no longer needed for routing (envoy
+   routes on prefix `/` + header). Single-backend deployments may still send it
+   for consistency.
+
+2. **Tab switch → new session.** Switching processor tabs creates a fresh
+   controller session for the newly selected backend (reuses the existing
+   `CreateSession` flow); the previous session is abandoned.
+
+3. **In-flight on switch → automatic cancel.** With no cancel-session primitive
+   yet, switching away from a tab with an exchange in flight submits an
+   automatic **cancel** decision for the current phase via the existing
+   `SubmitDecision` RPC, then starts the new session. If nothing is in flight, no
+   action is needed.
+
+4. **Alternative: disable switching during in-flight.** Keep tabs un-clickable
+   while a request/exchange is in flight (mirroring the composer's Send gating)
+   instead of auto-cancel.
+
+### Open questions (multi-language UI draft)
+
+- Auto-cancel vs. a real cancel-session primitive (the controller already
+  supports cancel decisions, so auto-cancel reuses that path).
+- Whether the auto-cancel should be phase-scoped or session-scoped.
+- Phase timeout (30s) vs. switch-time auto-cancel precedence.
+- Whether/how the existing single-session "New session" button coexists with
+  per-tab sessions.
+- Whether the lang header is sent for single-backend deployments too, or only
+  when more than one backend is deployed.
+
 ## Open questions
 
 - **Controller RPC shape**: `CreateSession`, `GetSession`, and … `StreamRequest`
