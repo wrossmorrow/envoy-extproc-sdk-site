@@ -14,7 +14,7 @@ FROM rust:${RUST_VERSION}
 COPY --from=builder /build/rust/demo-extproc/target/release/demo-extproc /app/demo-extproc
 ARG GRPC_HEALTH_PROBE_VERSION
 ARG TARGETARCH
-RUN curl -fsSL "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe_linux-${TARGETARCH}" \
-    -o /bin/grpc-health-probe && \
-    chmod +x /bin/grpc-health-probe
+RUN curl -fsSL "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${TARGETARCH}" \
+    -o /grpc-health-probe && \
+    chmod +x /grpc-health-probe
 ENTRYPOINT ["/app/demo-extproc"]
