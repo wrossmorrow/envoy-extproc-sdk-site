@@ -7,7 +7,7 @@ COPY rust/demo-extproc/Cargo.lock rust/demo-extproc/Cargo.lock
 COPY rust/demo-extproc/src/ rust/demo-extproc/src/
 COPY gen/rust/ /build/gen/rust/
 WORKDIR /build/rust/demo-extproc
-RUN cargo build --release && cargo install github.com/grpc-ecosystem/grpc-health-probe@v0.4.39
+RUN cargo build --release && cargo install github.com/grpc-ecosystem/grpc-health-probe@0.4.39
 
 FROM rust:${RUST_VERSION}
 COPY --from=builder /build/rust/demo-extproc/target/release/demo-extproc /app/demo-extproc
