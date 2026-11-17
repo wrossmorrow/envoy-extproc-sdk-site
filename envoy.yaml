@@ -36,7 +36,8 @@ static_resources:
                             prefix: "/"
                             headers:
                               - name: x-demo-target-lang
-                                value: rust
+                                string_match:
+                                  exact: rust
                           route:
                             cluster: upstream
                           typed_per_filter_config:
