@@ -27,6 +27,33 @@ static_resources:
                             prefix: "/"
                           route:
                             cluster: upstream
+                        # Draft: route to the Rust demo extproc when the request
+                        # carries `x-demo-target-lang: rust`. Requests without the
+                        # header (or with any other value) fall through to the
+                        # default route above, which uses the Go demo extproc.
+                        - name: extproc-rust
+                          match:
+                            prefix: "/"
+                            headers:
+                              - name: x-demo-target-lang
+                                value: rust
+                          route:
+                            cluster: upstream
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+                              grpc_service:
+                                envoy_grpc:
+                                  cluster_name: extproc-rust
+                              failure_mode_allow: false
+                              message_timeout: 60s
+                              processing_mode:
+                                request_header_mode: SEND
+                                response_header_mode: SEND
+                                request_body_mode: BUFFERED
+                                response_body_mode: BUFFERED
+                                request_trailer_mode: SKIP
+                                response_trailer_mode: SKIP
                 http_filters:
                   - name: envoy.filters.http.ext_proc
                     typed_config:
@@ -94,6 +121,25 @@ static_resources:
                 address:
                   socket_address:
                     address: extproc
+                    port_value: 50051
+    type: LOGICAL_DNS
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+  - name: extproc-rust
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: extproc-rust
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                hostname: extproc-rust
+                address:
+                  socket_address:
+                    address: extproc-rust
                     port_value: 50051
     type: LOGICAL_DNS
     typed_extension_protocol_options:
