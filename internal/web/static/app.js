@@ -22,6 +22,7 @@ const CONTROLLER_BASE = "/controller.v1.DemoControllerService";
 // content="https://envoy.example.com"> to call Envoy cross-origin (needs CORS).
 const ENVOY_BASE = (document.querySelector('meta[name="envoy-base"]') || {}).content || "/envoy";
 const SESSION_HEADER = "x-demo-session-id";
+const TARGET_LANG_HEADER = "x-demo-target-lang";
 
 // Mirrors controller.PhaseTimeout; only used when updates carry no deadline.
 const FALLBACK_PHASE_TIMEOUT_MS = 30000;
@@ -392,6 +393,7 @@ async function sendRequest() {
   const path = "/" + $("req-path").value.trim().replace(/^\/+/, "");
   const headers = parseHeaderLines($("req-headers").value);
   headers.set(SESSION_HEADER, state.sessionId);
+  headers.set(TARGET_LANG_HEADER, state.lang);
   const body = method === "GET" ? undefined : $("req-body").value;
 
   state.requestInFlight = true;
@@ -404,7 +406,7 @@ async function sendRequest() {
   const started = performance.now();
   let result;
   try {
-    const res = await fetch(ENVOY_BASE.replace(/\/+$/, "") + "/" + state.lang + path, { method, headers, body });
+    const res = await fetch(ENVOY_BASE.replace(/\/+$/, "") + path, { method, headers, body });
     result = { status: res.status, headers: res.headers, body: await res.text() };
   } catch (err) {
     result = { status: 0, headers: new Headers(), body: String(err) };
@@ -686,7 +688,14 @@ function applyPreset(preset) {
   $("req-body").value = preset.body;
 }
 
-function selectLang(lang) {
+async function selectLang(lang) {
+  const switching = lang !== state.lang;
+  if (switching && state.requestInFlight && state.phase && !state.deciding) {
+    // Abandon the in-flight exchange for the old backend by sending an automatic
+    // cancel decision for the current phase, then start a fresh session on the
+    // new backend.
+    await decide("cancel");
+  }
   state.lang = lang;
   for (const tab of document.querySelectorAll(".tabs [role=tab]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.lang === lang));
@@ -700,6 +709,12 @@ function selectLang(lang) {
       "The " + LANG_NAMES[lang] + " processor isn't deployed yet. Same filter, same controller, different SDK; it'll show up here.";
   }
   renderComposer();
+  if (switching) {
+    // Switching backends means a new controller session for the new backend;
+    // the old session is abandoned (its updates stream is dropped on the way
+    // out via startSession's abort).
+    await startSession();
+  }
 }
 
 // ---------------------------------------------------------------------------
