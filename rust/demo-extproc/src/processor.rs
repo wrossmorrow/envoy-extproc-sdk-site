@@ -35,8 +35,9 @@ pub struct DemoRequestProcessor {
     controller_addr: String,
     options: ProcessingOptions,
     exchange_timeout: Duration,
-    controller:
-        std::sync::Arc<tokio::sync::Mutex<Option<tonic::client::Grpc<tonic::transport::Channel>>>>,
+    controller: std::sync::Arc<
+        tokio::sync::Mutex<Option<DemoProcessorServiceClient<tonic::transport::Channel>>>,
+    >,
 }
 
 impl DemoRequestProcessor {
@@ -65,9 +66,23 @@ impl DemoRequestProcessor {
             return Ok(Some(handle.clone()));
         }
         let (tx, rx) = tokio::sync::mpsc::channel(4);
-        let mut client = DemoProcessorServiceClient::connect(self.controller_addr.clone())
-            .await
-            .map_err(|e| format!("failed to connect to controller: {}", e))?;
+        // Reuse a single controller client connection across exchanges, mirroring
+        // the Go demo extproc, so a transient transport error does not fail the
+        // exchange outright.
+        let mut client = {
+            let mut guard = self
+                .controller
+                .try_lock()
+                .map_err(|_| Error::from("controller lock".to_string()))?;
+            if guard.is_none() {
+                let addr = self.controller_addr.clone();
+                let c = DemoProcessorServiceClient::connect(addr)
+                    .await
+                    .map_err(|e| format!("failed to connect to controller: {}", e))?;
+                *guard = Some(c);
+            }
+            (*guard).clone().expect("controller client missing")
+        };
         let response = client
             .process(tokio_stream::wrappers::ReceiverStream::new(rx))
             .await
