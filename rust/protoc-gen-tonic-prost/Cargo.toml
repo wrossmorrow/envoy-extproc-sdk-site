@@ -1,0 +1,17 @@
+[package]
+name = "protoc-gen-tonic-prost"
+version = "0.1.0"
+edition = "2021"
+description = "protoc plugin that generates Rust gRPC code from tonic/prost service descriptors"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "protoc-gen-tonic-prost"
+path = "src/main.rs"
+
+[dependencies]
+prost = "0.14"
+prost-build = "0.14"
+prost-types = "0.14"
+tonic-prost-build = "0.14"

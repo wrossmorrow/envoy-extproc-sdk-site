@@ -14,3 +14,5 @@ plugins:
   - local: ["go", "tool", "protoc-gen-connect-go"]
     out: gen/go
     opt: paths=source_relative
+  - local: ["protoc-gen-tonic-prost"]
+    out: gen/rust
