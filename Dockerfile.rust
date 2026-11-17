@@ -1,0 +1,14 @@
+ARG RUST_VERSION=1.90-alpine
+FROM rust:${RUST_VERSION} AS builder
+
+WORKDIR /build
+COPY rust/demo-extproc/Cargo.toml rust/demo-extproc/Cargo.toml
+COPY rust/demo-extproc/Cargo.lock rust/demo-extproc/Cargo.lock
+COPY rust/demo-extproc/src/ rust/demo-extproc/src/
+COPY gen/rust/ /build/gen/rust/
+WORKDIR /build/rust/demo-extproc
+RUN cargo build --release
+
+FROM rust:${RUST_VERSION}
+COPY --from=builder /build/rust/demo-extproc/target/release/demo-extproc /app/demo-extproc
+ENTRYPOINT ["/app/demo-extproc"]
