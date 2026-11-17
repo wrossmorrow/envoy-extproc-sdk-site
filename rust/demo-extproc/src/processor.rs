@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use envoy_extproc_sdk::context::{
-    build_header_values_from_map, HeaderValue, RequestContext, RequestPhase,
+    build_header_values_from_map, request_phase_to_string, HeaderValue, RequestContext,
+    RequestPhase,
 };
 use envoy_extproc_sdk::headers::AllHeaders;
 use envoy_extproc_sdk::{is_stream_cancelled, Error, ProcessingOptions, RequestProcessor};
@@ -79,13 +80,29 @@ impl DemoRequestProcessor {
             return Ok(Some(handle.clone()));
         }
         let (tx, rx) = tokio::sync::mpsc::channel(4);
+        eprintln!(
+            "[demo-extproc] opening controller phase stream at {} for session exchange",
+            self.controller_addr
+        );
         let mut client = DemoProcessorServiceClient::connect(self.controller_addr.clone())
             .await
-            .map_err(|e| format!("failed to connect to controller: {}", e))?;
+            .map_err(|e| {
+                eprintln!(
+                    "[demo-extproc] failed to connect to controller at {}: {}",
+                    self.controller_addr, e
+                );
+                format!("failed to connect to controller: {}", e)
+            })?;
         let response = client
             .process(tokio_stream::wrappers::ReceiverStream::new(rx))
             .await
-            .map_err(Error::from)?
+            .map_err(|e| {
+                eprintln!(
+                    "[demo-extproc] controller phase stream to {} failed: {}",
+                    self.controller_addr, e
+                );
+                Error::from(e)
+            })?
             .into_inner();
         let handle = ControllerPhaseStream {
             tx,
@@ -111,27 +128,59 @@ impl DemoRequestProcessor {
             None => return Ok(None),
         };
         let outcome = tokio::time::timeout(self.exchange_timeout, async {
+            eprintln!(
+                "[demo-extproc] phase={} session_id={} sending phase update to controller",
+                request_phase_to_string(phase),
+                session_id
+            );
             handle
                 .tx
                 .send(ProcessRequest {
-                    session_id,
+                    session_id: session_id.clone(),
                     phase: controller_phase(phase),
                     snapshot: Some(snapshot),
                 })
                 .await
-                .map_err(Error::from)?;
+                .map_err(|e| {
+                    eprintln!(
+                        "[demo-extproc] phase={} session_id={} failed to send phase update: {}",
+                        request_phase_to_string(phase),
+                        session_id,
+                        e
+                    );
+                    Error::from(e)
+                })?;
             let mut response = handle.response.lock().await;
-            let maybe = response.message().await.map_err(|e| Error::from(e.clone()));
+            let maybe = response.message().await.map_err(|e| {
+                eprintln!(
+                    "[demo-extproc] phase={} session_id={} failed to receive controller decision: {}",
+                    request_phase_to_string(phase),
+                    session_id,
+                    e
+                );
+                Error::from(e.clone())
+            });
             let decision = match maybe {
                 Ok(Some(resp)) => resp.decision,
                 _ => None,
             };
+            eprintln!(
+                "[demo-extproc] phase={} session_id={} decision={}",
+                request_phase_to_string(phase),
+                session_id,
+                decision.is_some()
+            );
             Ok::<Option<Decision>, Error>(decision)
         })
         .await;
         let decision: Option<Decision> = match outcome {
             Ok(result) => result?,
             Err(_elapsed) => {
+                eprintln!(
+                    "[demo-extproc] phase={} session_id={} timed out waiting for controller decision",
+                    request_phase_to_string(phase),
+                    session_id
+                );
                 return Err("timed out waiting for controller decision"
                     .to_string()
                     .into());
@@ -254,6 +303,7 @@ impl DemoRequestProcessor {
     ) -> Result<(), Error> {
         let session_id = self.session_id_for(ctx, headers);
         let snapshot = self.snapshot(ctx, headers, body);
+        log_phase_sent(phase, &session_id, &snapshot);
         let decision = self
             .send_phase_and_decide(ctx, phase, session_id, snapshot)
             .await?;
@@ -298,6 +348,22 @@ impl DemoRequestProcessor {
         }
         Ok(())
     }
+}
+
+/// Log the phase update sent to the controller for the current exchange phase,
+/// including the snapshot reported for the phase, so the phase flow observed by
+/// the demo extproc is visible in the extproc logs.
+fn log_phase_sent(phase: RequestPhase, session_id: &str, snapshot: &HttpSnapshot) {
+    eprintln!(
+        "[demo-extproc] phase={} controller_phase={} session_id={} headers={} body_bytes={} status={} body_truncated={}",
+        request_phase_to_string(phase),
+        controller_phase(phase),
+        session_id,
+        snapshot.headers.len(),
+        snapshot.body.len(),
+        snapshot.status,
+        snapshot.body_truncated,
+    );
 }
 
 /// Whether the given phase is a response phase. Only response phases (headers,
@@ -407,7 +473,7 @@ impl RequestProcessor for DemoRequestProcessor {
             .await
     }
 
-    async fn error_handler(&self, ctx: &mut RequestContext, _phase: RequestPhase, err: Error) {
+    async fn error_handler(&self, ctx: &mut RequestContext, phase: RequestPhase, err: Error) {
         if is_stream_cancelled(Some(&err)) {
             // Envoy tore the downstream down and cancelled the extproc stream;
             // treat it as the cancellation signal for this exchange phase and
@@ -417,7 +483,15 @@ impl RequestProcessor for DemoRequestProcessor {
         }
         // Surface the processing failure. The SDK aborts the stream when
         // abort_on_processor_failure is set (the demo's default), so a failed
-        // phase fails the exchange closed rather than continuing.
+        // phase fails the exchange closed rather than continuing. Phase
+        // failures returned from the phase handlers are logged there and flow
+        // through the phase error path; this handler reports stream-level
+        // failures the SDK itself detects.
+        eprintln!(
+            "[demo-extproc] processing error: phase={} error={}",
+            request_phase_to_string(phase),
+            err
+        );
     }
 
     fn close(&self, _grace_period_seconds: i32) -> Result<(), Error> {
