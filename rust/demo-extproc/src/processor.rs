@@ -393,7 +393,7 @@ impl RequestProcessor for DemoRequestProcessor {
             .await
     }
 
-    async fn error_handler(&self, ctx: &mut RequestContext, _phase: RequestPhase, err: Error) {
+    async fn error_handler(&self, ctx: &mut RequestContext, phase: RequestPhase, err: Error) {
         if is_stream_cancelled(Some(&err)) {
             // Envoy tore the downstream down and cancelled the extproc stream;
             // treat it as the cancellation signal for this exchange phase and
@@ -404,6 +404,7 @@ impl RequestProcessor for DemoRequestProcessor {
         // Surface the processing failure. The SDK aborts the stream when
         // abort_on_processor_failure is set (the demo's default), so a failed
         // phase fails the exchange closed rather than continuing.
+        eprintln!("demo extproc processing error: phase={phase:?} error={err:?}");
     }
 
     fn close(&self, _grace_period_seconds: i32) -> Result<(), Error> {
