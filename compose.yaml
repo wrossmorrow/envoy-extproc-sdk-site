@@ -69,5 +69,23 @@ services:
     networks:
       - demo
 
+  # extproc (Rust implementation), integrated with envoy and holds requests for interactive handling
+  extproc-rust:
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-extproc-rust:${EXTPROC_RUST_VERSION:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    ports:
+      - "50052:50051"
+      - "9095:9090"
+    healthcheck:
+      test: ["CMD", "/grpc-health-probe", "-addr=localhost:50051"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+    networks:
+      - demo
+
 networks:
   demo: {}
