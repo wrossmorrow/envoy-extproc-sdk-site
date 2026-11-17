@@ -67,6 +67,10 @@ build cmd *flags="": gen
 containerize cmd tag=image_tag *flags="": gen
     docker build --build-arg CMD={{cmd}} -t {{ image_name }}-{{cmd}}:{{ tag }} . {{ flags }}
 
+# containerize the rust demo extproc
+containerize-rust tag=image_tag:
+    docker build -f Dockerfile.rust -t {{ image_name }}-extproc:{{ tag }} .
+
 # bring up compose
 up *flags="": gen
     docker compose up --build {{flags}}
