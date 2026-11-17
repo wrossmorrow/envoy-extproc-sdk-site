@@ -23,14 +23,10 @@ static_resources:
                     - name: upstream
                       domains: ["*"]
                       routes:
-                        - match:
-                            prefix: "/"
-                          route:
-                            cluster: upstream
                         # Draft: route to the Rust demo extproc when the request
                         # carries `x-demo-target-lang: rust`. Requests without the
                         # header (or with any other value) fall through to the
-                        # default route above, which uses the Go demo extproc.
+                        # default route below, which uses the Go demo extproc.
                         - name: extproc-rust
                           match:
                             prefix: "/"
@@ -42,19 +38,25 @@ static_resources:
                             cluster: upstream
                           typed_per_filter_config:
                             envoy.filters.http.ext_proc:
-                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
-                              grpc_service:
-                                envoy_grpc:
-                                  cluster_name: extproc-rust
-                              failure_mode_allow: false
-                              message_timeout: 60s
-                              processing_mode:
-                                request_header_mode: SEND
-                                response_header_mode: SEND
-                                request_body_mode: BUFFERED
-                                response_body_mode: BUFFERED
-                                request_trailer_mode: SKIP
-                                response_trailer_mode: SKIP
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              overrides:
+                                grpc_service:
+                                  envoy_grpc:
+                                    cluster_name: extproc-rust
+                                failure_mode_allow: false
+                                processing_mode:
+                                  request_header_mode: SEND
+                                  response_header_mode: SEND
+                                  request_body_mode: BUFFERED
+                                  response_body_mode: BUFFERED
+                                  request_trailer_mode: SKIP
+                                  response_trailer_mode: SKIP
+                        # Default demo target: no x-demo-target-lang header (or any
+                        # language without a more specific route) -> golang extproc.
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: upstream
                 http_filters:
                   - name: envoy.filters.http.ext_proc
                     typed_config:
