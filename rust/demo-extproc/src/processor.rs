@@ -17,7 +17,11 @@ use crate::controller::v1::{Decision, Header, HttpSnapshot, ProcessRequest, Proc
 const SESSION_ID_HEADER: &str = "x-demo-session-id";
 const PROCESSED_HEADER: &str = "x-demo-processed";
 const SNAPSHOT_BODY_LIMIT: usize = 16 * 1024;
+const DEFAULT_CONTROLLER_ADDR: &str = "http://controller:9093";
+const CONTROLLER_ADDR_ENV: &str = "CONTROLLER_ADDR";
 const DEFAULT_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(300);
+const EXCHANGE_TIMEOUT_ENV: &str = "EXCHANGE_TIMEOUT";
+const ABORT_ON_PROCESSOR_FAILURE_ENV: &str = "ABORT_ON_PROCESSOR_FAILURE";
 
 /// Controller phase-stream handle for the current exchange, held in the
 /// request context so later phases of the same exchange reuse it.
@@ -46,12 +50,43 @@ impl DemoRequestProcessor {
         Self {
             controller_addr: Self::controller_endpoint(controller_addr),
             options: ProcessingOptions {
-                abort_on_processor_failure: true,
+                abort_on_processor_failure: Self::abort_on_processor_failure(),
                 ..Default::default()
             },
-            exchange_timeout: DEFAULT_EXCHANGE_TIMEOUT,
+            exchange_timeout: Self::exchange_timeout(),
             controller: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+
+    /// Phase exchange timeout, in seconds, from the `EXCHANGE_TIMEOUT`
+    /// environment variable, defaulting to 300 seconds.
+    pub fn exchange_timeout() -> Duration {
+        match std::env::var(EXCHANGE_TIMEOUT_ENV) {
+            Ok(value) => value
+                .parse::<u64>()
+                .ok()
+                .map(Duration::from_secs)
+                .unwrap_or(DEFAULT_EXCHANGE_TIMEOUT),
+            Err(_) => DEFAULT_EXCHANGE_TIMEOUT,
+        }
+    }
+
+    /// Whether to abort the phase stream when the processor fails, from the
+    /// `ABORT_ON_PROCESSOR_FAILURE` environment variable, defaulting to true.
+    pub fn abort_on_processor_failure() -> bool {
+        match std::env::var(ABORT_ON_PROCESSOR_FAILURE_ENV) {
+            Ok(value) => value.parse().unwrap_or(true),
+            Err(_) => true,
+        }
+    }
+
+    /// Build a processor configured from the environment: controller phase
+    /// stream address from `CONTROLLER_ADDR`, phase exchange timeout from
+    /// `EXCHANGE_TIMEOUT`, and fail-closed abort from `ABORT_ON_PROCESSOR_FAILURE`.
+    pub fn from_env() -> Self {
+        let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
+            .unwrap_or_else(|_| DEFAULT_CONTROLLER_ADDR.to_string());
+        Self::new(&controller_addr)
     }
 
     /// Normalize a controller gRPC endpoint for the tonic client. tonic

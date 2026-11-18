@@ -5,15 +5,15 @@ use demo_extproc::{Error, GenericExtProcServer, Metrics, ProcessingOptions, Serv
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    // tonic endpoint URLs require a scheme (e.g. http://controller:9093); a bare
-    // host such as `controller:9093` is rejected with "invalid URL, scheme is
-    // missing", so the controller phase stream can never be opened.
-    let processor = Arc::new(DemoRequestProcessor::new("http://controller:9093"));
+    // Controller gRPC endpoint for the phase exchange, from the CONTROLLER_ADDR
+    // environment variable (default http://controller:9093; tonic endpoint URLs
+    // require a scheme).
+    let processor = Arc::new(DemoRequestProcessor::from_env());
     let server = GenericExtProcServer::new(
         "demo".to_string(),
         processor,
         Some(ProcessingOptions {
-            abort_on_processor_failure: true,
+            abort_on_processor_failure: DemoRequestProcessor::abort_on_processor_failure(),
             ..Default::default()
         }),
         Metrics::new(),
