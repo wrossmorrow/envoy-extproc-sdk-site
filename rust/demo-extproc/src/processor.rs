@@ -107,6 +107,7 @@ impl DemoRequestProcessor {
                 Error::from(e)
             })?
             .into_inner();
+        eprintln!("[demo-extproc] controller phase stream call returned");
         let handle = ControllerPhaseStream {
             tx,
             response: std::sync::Arc::new(tokio::sync::Mutex::new(response)),
