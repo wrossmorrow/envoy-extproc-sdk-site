@@ -42,13 +42,27 @@ pub struct DemoRequestProcessor {
 impl DemoRequestProcessor {
     pub fn new(controller_addr: &str) -> Self {
         Self {
-            controller_addr: controller_addr.to_string(),
+            controller_addr: Self::controller_endpoint(controller_addr),
             options: ProcessingOptions {
                 abort_on_processor_failure: true,
                 ..Default::default()
             },
             exchange_timeout: DEFAULT_EXCHANGE_TIMEOUT,
             controller: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Normalize a controller gRPC endpoint for the tonic client. tonic
+    /// endpoint URLs require a scheme (e.g. `http://controller:9093`); a bare
+    /// host such as `controller:9093` is rejected with `invalid URL, scheme is
+    /// missing`, so the controller phase stream can never be opened and the
+    /// controller is never contacted. Prefix the default scheme when the
+    /// address does not carry one.
+    fn controller_endpoint(addr: &str) -> String {
+        if addr.contains("://") {
+            addr.to_string()
+        } else {
+            format!("http://{}", addr)
         }
     }
 
@@ -303,19 +317,22 @@ fn is_masked(name: &str) -> bool {
 }
 
 /// Translate the Rust SDK phase to the phase number the controller expects in
-/// the `ProcessRequest.phase` field. The controller (and envoy) number phases
-/// starting at `NotStarted` for the pre-request phases, while the Rust SDK
-/// numbers phases starting at the request phases, so the SDK discriminant is
-/// mapped onto the controller's phase numbering before it is sent.
+/// the `ProcessRequest.phase` field. The controller translates the phase number
+/// an extproc sends via its own phase mapping before keying session state and
+/// decisions, and that mapping is keyed on the SDK's protocol phase numbers
+/// (`Undetermined = 0`, `RequestHeaders = 1`, ... `ResponseTrailers = 6`). The
+/// phase number sent here is therefore the SDK phase number for the phase being
+/// processed; shifting it onto the controller's own phase numbering would make
+/// the controller key the wrong session phase.
 fn controller_phase(phase: RequestPhase) -> i32 {
     match phase {
         RequestPhase::Undetermined => 0,
-        RequestPhase::RequestHeaders => 2,
-        RequestPhase::RequestBody => 3,
-        RequestPhase::RequestTrailers => 4,
-        RequestPhase::ResponseHeaders => 5,
-        RequestPhase::ResponseBody => 6,
-        RequestPhase::ResponseTrailers => 7,
+        RequestPhase::RequestHeaders => 1,
+        RequestPhase::RequestBody => 2,
+        RequestPhase::RequestTrailers => 3,
+        RequestPhase::ResponseHeaders => 4,
+        RequestPhase::ResponseBody => 5,
+        RequestPhase::ResponseTrailers => 6,
     }
 }
 
@@ -523,10 +540,33 @@ mod tests {
 #[test]
 fn test_controller_phase_maps_sdk_phases() {
     assert_eq!(controller_phase(RequestPhase::Undetermined), 0);
-    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 2);
-    assert_eq!(controller_phase(RequestPhase::RequestBody), 3);
-    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 4);
-    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 5);
-    assert_eq!(controller_phase(RequestPhase::ResponseBody), 6);
-    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 7);
+    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 1);
+    assert_eq!(controller_phase(RequestPhase::RequestBody), 2);
+    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 3);
+    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 4);
+    assert_eq!(controller_phase(RequestPhase::ResponseBody), 5);
+    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 6);
+}
+
+#[test]
+fn test_controller_endpoint_adds_scheme_to_bare_host() {
+    // tonic endpoint URLs require a scheme; a bare host is rejected with
+    // "invalid URL, scheme is missing" and the controller phase stream can
+    // never be opened, so the demo must normalize the controller address.
+    assert_eq!(
+        DemoRequestProcessor::controller_endpoint("controller:9093"),
+        "http://controller:9093"
+    );
+}
+
+#[test]
+fn test_controller_endpoint_keeps_scheme_qualified_address() {
+    assert_eq!(
+        DemoRequestProcessor::controller_endpoint("http://controller:9093"),
+        "http://controller:9093"
+    );
+    assert_eq!(
+        DemoRequestProcessor::controller_endpoint("https://controller:9093"),
+        "https://controller:9093"
+    );
 }
