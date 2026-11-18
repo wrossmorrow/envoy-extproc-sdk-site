@@ -121,14 +121,17 @@ pub struct Cancel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum Phase {
+    /// PHASE_UNSPECIFIED is the pre-phase slot: the session is waiting for the
+    /// envoy-bound request to enter its first phase. Real phases are numbered to
+    /// align with envoy's ext_proc phase values (1 = REQUEST_HEADERS, ..., 6 =
+    /// RESPONSE_TRAILERS).
     Unspecified = 0,
-    NotStarted = 1,
-    RequestHeaders = 2,
-    RequestBody = 3,
-    RequestTrailers = 4,
-    ResponseHeaders = 5,
-    ResponseBody = 6,
-    ResponseTrailers = 7,
+    RequestHeaders = 1,
+    RequestBody = 2,
+    RequestTrailers = 3,
+    ResponseHeaders = 4,
+    ResponseBody = 5,
+    ResponseTrailers = 6,
 }
 impl Phase {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -138,7 +141,6 @@ impl Phase {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Unspecified => "PHASE_UNSPECIFIED",
-            Self::NotStarted => "PHASE_NOT_STARTED",
             Self::RequestHeaders => "PHASE_REQUEST_HEADERS",
             Self::RequestBody => "PHASE_REQUEST_BODY",
             Self::RequestTrailers => "PHASE_REQUEST_TRAILERS",
@@ -151,7 +153,6 @@ impl Phase {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "PHASE_UNSPECIFIED" => Some(Self::Unspecified),
-            "PHASE_NOT_STARTED" => Some(Self::NotStarted),
             "PHASE_REQUEST_HEADERS" => Some(Self::RequestHeaders),
             "PHASE_REQUEST_BODY" => Some(Self::RequestBody),
             "PHASE_REQUEST_TRAILERS" => Some(Self::RequestTrailers),
@@ -255,7 +256,7 @@ pub mod demo_controller_service_client {
             self
         }
         /// CreateSession creates a new session and opens a stream of updates. The
-        /// first Update carries the session id with phase NOT_STARTED; the browser
+        /// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
         /// then sends the envoy-bound request carrying that session id and receives
         /// phase updates as the session resolves.
         pub async fn create_session(
@@ -339,7 +340,7 @@ pub mod demo_controller_service_server {
             + std::marker::Send
             + 'static;
         /// CreateSession creates a new session and opens a stream of updates. The
-        /// first Update carries the session id with phase NOT_STARTED; the browser
+        /// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
         /// then sends the envoy-bound request carrying that session id and receives
         /// phase updates as the session resolves.
         async fn create_session(
