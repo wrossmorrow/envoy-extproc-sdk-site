@@ -49,7 +49,7 @@ const (
 // DemoControllerServiceClient is a client for the controller.v1.DemoControllerService service.
 type DemoControllerServiceClient interface {
 	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase NOT_STARTED; the browser
+	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
 	// then sends the envoy-bound request carrying that session id and receives
 	// phase updates as the session resolves.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.ServerStreamForClient[v1.CreateSessionResponse], error)
@@ -103,7 +103,7 @@ func (c *demoControllerServiceClient) SubmitDecision(ctx context.Context, req *c
 // service.
 type DemoControllerServiceHandler interface {
 	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase NOT_STARTED; the browser
+	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
 	// then sends the envoy-bound request carrying that session id and receives
 	// phase updates as the session resolves.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest], *connect.ServerStream[v1.CreateSessionResponse]) error
