@@ -381,12 +381,12 @@ fn is_masked(name: &str) -> bool {
 fn controller_phase(phase: RequestPhase) -> i32 {
     match phase {
         RequestPhase::Undetermined => 0,
-        RequestPhase::RequestHeaders => 2,
-        RequestPhase::RequestBody => 3,
-        RequestPhase::RequestTrailers => 4,
-        RequestPhase::ResponseHeaders => 5,
-        RequestPhase::ResponseBody => 6,
-        RequestPhase::ResponseTrailers => 7,
+        RequestPhase::RequestHeaders => 1,
+        RequestPhase::RequestBody => 2,
+        RequestPhase::RequestTrailers => 3,
+        RequestPhase::ResponseHeaders => 4,
+        RequestPhase::ResponseBody => 5,
+        RequestPhase::ResponseTrailers => 6,
     }
 }
 
@@ -602,10 +602,10 @@ mod tests {
 #[test]
 fn test_controller_phase_maps_sdk_phases() {
     assert_eq!(controller_phase(RequestPhase::Undetermined), 0);
-    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 2);
-    assert_eq!(controller_phase(RequestPhase::RequestBody), 3);
-    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 4);
-    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 5);
-    assert_eq!(controller_phase(RequestPhase::ResponseBody), 6);
-    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 7);
+    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 1);
+    assert_eq!(controller_phase(RequestPhase::RequestBody), 2);
+    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 3);
+    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 4);
+    assert_eq!(controller_phase(RequestPhase::ResponseBody), 5);
+    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 6);
 }
