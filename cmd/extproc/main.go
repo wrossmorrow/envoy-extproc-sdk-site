@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	defaultControllerAddr = "controller:9093"
-
 	// demoMetricsPort is the port the demo serves its own Prometheus metrics
 	// endpoint on (Go runtime goroutines) in addition to the SDK metrics endpoint.
 	demoMetricsPort = 9096
@@ -27,7 +25,7 @@ func main() {
 	sopts.MetricsHTTPPort = 9090
 	sopts.TerminationGracePeriodSeconds = 10
 
-	proc := extproc.NewRequestProcessor(defaultControllerAddr)
+	proc := extproc.NewRequestProcessorFromEnv()
 
 	sdk.MustServe(sopts, proc, slog.Default())
 
