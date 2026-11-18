@@ -93,6 +93,9 @@ impl DemoRequestProcessor {
                 );
                 format!("failed to connect to controller: {:?}", e)
             })?;
+        eprintln!(
+            "[demo-extproc] calling controller process (open phase stream) for session exchange"
+        );
         let response = client
             .process(tokio_stream::wrappers::ReceiverStream::new(rx))
             .await
