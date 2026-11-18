@@ -303,19 +303,19 @@ fn is_masked(name: &str) -> bool {
 }
 
 /// Translate the Rust SDK phase to the phase number the controller expects in
-/// the `ProcessRequest.phase` field. The controller's Phase enum is aligned
-/// with the envoy/ext_proc phase numbering, and the Rust SDK numbers phases
-/// the same way (Undetermined = 0 for the pre-phase, then the request/response
-/// phases), so the SDK discriminant is the phase number the controller expects.
+/// the `ProcessRequest.phase` field. The controller (and envoy) number phases
+/// starting at `NotStarted` for the pre-request phases, while the Rust SDK
+/// numbers phases starting at the request phases, so the SDK discriminant is
+/// mapped onto the controller's phase numbering before it is sent.
 fn controller_phase(phase: RequestPhase) -> i32 {
     match phase {
         RequestPhase::Undetermined => 0,
-        RequestPhase::RequestHeaders => 1,
-        RequestPhase::RequestBody => 2,
-        RequestPhase::RequestTrailers => 3,
-        RequestPhase::ResponseHeaders => 4,
-        RequestPhase::ResponseBody => 5,
-        RequestPhase::ResponseTrailers => 6,
+        RequestPhase::RequestHeaders => 2,
+        RequestPhase::RequestBody => 3,
+        RequestPhase::RequestTrailers => 4,
+        RequestPhase::ResponseHeaders => 5,
+        RequestPhase::ResponseBody => 6,
+        RequestPhase::ResponseTrailers => 7,
     }
 }
 
@@ -523,10 +523,10 @@ mod tests {
 #[test]
 fn test_controller_phase_maps_sdk_phases() {
     assert_eq!(controller_phase(RequestPhase::Undetermined), 0);
-    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 1);
-    assert_eq!(controller_phase(RequestPhase::RequestBody), 2);
-    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 3);
-    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 4);
-    assert_eq!(controller_phase(RequestPhase::ResponseBody), 5);
-    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 6);
+    assert_eq!(controller_phase(RequestPhase::RequestHeaders), 2);
+    assert_eq!(controller_phase(RequestPhase::RequestBody), 3);
+    assert_eq!(controller_phase(RequestPhase::RequestTrailers), 4);
+    assert_eq!(controller_phase(RequestPhase::ResponseHeaders), 5);
+    assert_eq!(controller_phase(RequestPhase::ResponseBody), 6);
+    assert_eq!(controller_phase(RequestPhase::ResponseTrailers), 7);
 }
