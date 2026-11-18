@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -29,6 +30,11 @@ const (
 	// controllerSessionIDKey is the RequestContext data key holding the controller
 	// session id for the current exchange phase.
 	controllerSessionIDKey = "controllerDemoSessionID"
+
+	controllerAddrEnv          = "CONTROLLER_ADDR"
+	defaultControllerAddr      = "controller:9093"
+	exchangeTimeoutEnv         = "EXCHANGE_TIMEOUT"
+	abortOnProcessorFailureEnv = "ABORT_ON_PROCESSOR_FAILURE"
 
 	// defaultExchangeTimeout bounds a single controller exchange phase stream (the
 	// per-exchange budget across the exchange's phases).
@@ -59,14 +65,60 @@ type RequestProcessor struct {
 }
 
 // NewRequestProcessor returns a RequestProcessor wired to the controller gRPC
-// address that owns the DemoProcessorService channel.
+// address that owns the DemoProcessorService channel. The phase exchange timeout
+// and the fail-closed abort flag are read from the environment (EXCHANGE_TIMEOUT
+// and ABORT_ON_PROCESSOR_FAILURE respectively), defaulting to 5 minutes and
+// true.
 func NewRequestProcessor(controllerAddr string) *RequestProcessor {
 	return &RequestProcessor{
-		opts:            &extproc.ProcessingOptions{AbortOnProcessorFailure: true},
+		opts:            &extproc.ProcessingOptions{AbortOnProcessorFailure: abortOnProcessorFailure()},
 		logger:          slog.Default(),
 		controllerAddr:  controllerAddr,
-		exchangeTimeout: defaultExchangeTimeout,
+		exchangeTimeout: exchangeTimeout(),
 	}
+}
+
+// NewRequestProcessorFromEnv returns a RequestProcessor wired to the controller
+// gRPC address from the CONTROLLER_ADDR environment variable, with the phase
+// exchange timeout and fail-closed abort flag read from the environment as well.
+func NewRequestProcessorFromEnv() *RequestProcessor {
+	return NewRequestProcessor(controllerAddrFromEnv())
+}
+
+// controllerAddrFromEnv returns the controller gRPC address from the
+// CONTROLLER_ADDR environment variable, defaulting to controller:9093.
+func controllerAddrFromEnv() string {
+	return envOr(controllerAddrEnv, defaultControllerAddr)
+}
+
+// exchangeTimeout returns the phase exchange timeout, in seconds, from the
+// EXCHANGE_TIMEOUT environment variable, defaulting to 5 minutes.
+func exchangeTimeout() time.Duration {
+	seconds, err := strconv.Atoi(envOr(exchangeTimeoutEnv, ""))
+	if err != nil {
+		return defaultExchangeTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// abortOnProcessorFailure returns whether the demo extproc aborts the phase
+// stream when the processor fails, from the ABORT_ON_PROCESSOR_FAILURE
+// environment variable, defaulting to true.
+func abortOnProcessorFailure() bool {
+	enabled, err := strconv.ParseBool(envOr(abortOnProcessorFailureEnv, ""))
+	if err != nil {
+		return true
+	}
+	return enabled
+}
+
+// envOr returns the value of the environment variable named key, or fallback if
+// unset or empty.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // GetName returns the processor name reported to the SDK and Envoy.
