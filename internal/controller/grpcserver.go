@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"io"
+	"log"
 
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	grpc "google.golang.org/grpc"
@@ -66,6 +67,7 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 	defer func() { demoControllerProcessStreamsOpen.Dec() }()
 	for {
 		update, err := stream.Recv()
+		log.Printf("Controller received %v, %v\n", update, err)
 		if err != nil {
 			if err != io.EOF {
 				return err
