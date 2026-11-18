@@ -36,8 +36,9 @@ pub struct DemoRequestProcessor {
     controller_addr: String,
     options: ProcessingOptions,
     exchange_timeout: Duration,
-    controller:
-        std::sync::Arc<tokio::sync::Mutex<Option<tonic::client::Grpc<tonic::transport::Channel>>>>,
+    controller: std::sync::Arc<
+        tokio::sync::Mutex<Option<DemoProcessorServiceClient<tonic::transport::Channel>>>,
+    >,
 }
 
 impl DemoRequestProcessor {
@@ -71,73 +72,23 @@ impl DemoRequestProcessor {
     /// fresh one when the request context has none. The handle is stored in the
     /// request context (which persists across phases of an exchange), scoping it
     /// to the exchange rather than the processor instance. The underlying
-    /// controller connection is shared, not per exchange.
+    /// controller connection is shared, not per exchange. The phase update is
+    /// sent on the controller phase stream before the controller decision is
+    /// awaited: the initial ProcessRequest of a fresh exchange is enqueued
+    /// before the controller RPC is awaited, so the controller receives the
+    /// first message and can reply without the extproc side waiting on HTTP/2
+    /// response headers that are only flushed once the first request message
+    /// arrives.
     async fn controller_stream(
-        &self,
-        ctx: &mut RequestContext,
-    ) -> Result<Option<ControllerPhaseStream>, Error> {
-        if let Ok(Some(handle)) = ctx.get_value::<Option<ControllerPhaseStream>>() {
-            return Ok(Some(handle.clone()));
-        }
-        let (tx, rx) = tokio::sync::mpsc::channel(4);
-        eprintln!(
-            "[demo-extproc] opening controller phase stream at {} for session exchange",
-            self.controller_addr
-        );
-        let mut client = DemoProcessorServiceClient::connect(self.controller_addr.clone())
-            .await
-            .map_err(|e| {
-                eprintln!(
-                    "[demo-extproc] failed to connect to controller at {}: {:?}",
-                    self.controller_addr, e
-                );
-                format!("failed to connect to controller: {:?}", e)
-            })?;
-        eprintln!(
-            "[demo-extproc] calling controller process (open phase stream) for session exchange"
-        );
-        let response = client
-            .process(tokio_stream::wrappers::ReceiverStream::new(rx))
-            .await
-            .map_err(|e| {
-                eprintln!(
-                    "[demo-extproc] controller phase stream to {} failed: {}",
-                    self.controller_addr, e
-                );
-                Error::from(e)
-            })?
-            .into_inner();
-        eprintln!("[demo-extproc] controller phase stream call returned");
-        let handle = ControllerPhaseStream {
-            tx,
-            response: std::sync::Arc::new(tokio::sync::Mutex::new(response)),
-        };
-        eprintln!("[demo-extproc] controller phase stream established");
-        ctx.set_value::<Option<ControllerPhaseStream>>(Some(handle.clone()))?;
-        Ok(Some(handle))
-    }
-
-    /// Send a phase update carrying the phase snapshot to the controller for
-    /// the session and wait for the controller's decision. Returns the decision
-    /// (continue/cancel), if any.
-    async fn send_phase_and_decide(
         &self,
         ctx: &mut RequestContext,
         phase: RequestPhase,
         session_id: String,
         snapshot: HttpSnapshot,
-    ) -> Result<Option<Decision>, Error> {
-        let handle = self.controller_stream(ctx).await?;
-        let handle = match handle {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-        let outcome = tokio::time::timeout(self.exchange_timeout, async {
-            eprintln!(
-                "[demo-extproc] phase={} session_id={} sending phase update to controller",
-                request_phase_to_string(phase),
-                session_id
-            );
+    ) -> Result<ControllerPhaseStream, Error> {
+        if let Ok(Some(handle)) = ctx.get_value::<Option<ControllerPhaseStream>>() {
+            // Stream already open for this exchange: send the next phase update
+            // on it, then hand the handle back so the caller awaits the decision.
             handle
                 .tx
                 .send(ProcessRequest {
@@ -155,6 +106,105 @@ impl DemoRequestProcessor {
                     );
                     Error::from(e)
                 })?;
+            Ok(handle.clone())
+        } else {
+            // First phase of a fresh exchange: enqueue the initial ProcessRequest
+            // before awaiting the controller RPC so the first message is on the
+            // wire when the server is able to respond, instead of deadlocking on
+            // an RPC that waits for response headers that only come after the
+            // first request message.
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            tx.send(ProcessRequest {
+                session_id: session_id.clone(),
+                phase: controller_phase(phase),
+                snapshot: Some(snapshot),
+            })
+            .await
+            .map_err(|e| {
+                eprintln!(
+                    "[demo-extproc] phase={} session_id={} failed to enqueue initial request: {}",
+                    request_phase_to_string(phase),
+                    session_id,
+                    e
+                );
+                Error::from(e)
+            })?;
+            eprintln!(
+                "[demo-extproc] opening controller phase stream at {} for session exchange",
+                self.controller_addr
+            );
+            let mut client = {
+                // Reuse the controller connection cached from a previous
+                // exchange when one is available; only open a new controller
+                // connection when the cache is empty (e.g. after `close`).
+                let mut guard = self.controller.lock().await;
+                if let Some(client) = guard.take() {
+                    client
+                } else {
+                    let client = DemoProcessorServiceClient::connect(self.controller_addr.clone())
+                        .await
+                        .map_err(|e| {
+                            eprintln!(
+                                "[demo-extproc] failed to connect to controller at {}: {:?}",
+                                self.controller_addr, e
+                            );
+                            format!("failed to connect to controller: {:?}", e)
+                        })?;
+                    *guard = Some(client.clone());
+                    client
+                }
+            };
+            eprintln!(
+                "[demo-extproc] calling controller process (open phase stream) for session exchange"
+            );
+            let response = client
+                .process(tokio_stream::wrappers::ReceiverStream::new(rx))
+                .await
+                .map_err(|e| {
+                    eprintln!(
+                        "[demo-extproc] controller phase stream to {} failed: {}",
+                        self.controller_addr, e
+                    );
+                    Error::from(e)
+                })?
+                .into_inner();
+            // Hand the controller connection back so the next exchange reuses it
+            // instead of opening a new connection per phase exchange.
+            {
+                let mut guard = self.controller.lock().await;
+                *guard = Some(client);
+            }
+            eprintln!("[demo-extproc] controller phase stream call returned");
+            let handle = ControllerPhaseStream {
+                tx,
+                response: std::sync::Arc::new(tokio::sync::Mutex::new(response)),
+            };
+            eprintln!("[demo-extproc] controller phase stream established");
+            ctx.set_value::<Option<ControllerPhaseStream>>(Some(handle.clone()))?;
+            Ok(handle)
+        }
+    }
+
+    /// Send a phase update carrying the phase snapshot to the controller for
+    /// the session (the initial ProcessRequest for a fresh exchange, or the next
+    /// phase update for a reused stream) and wait for the controller's decision.
+    /// Returns the decision (continue/cancel), if any.
+    async fn send_phase_and_decide(
+        &self,
+        ctx: &mut RequestContext,
+        phase: RequestPhase,
+        session_id: String,
+        snapshot: HttpSnapshot,
+    ) -> Result<Option<Decision>, Error> {
+        let handle = self
+            .controller_stream(ctx, phase, session_id.clone(), snapshot)
+            .await?;
+        let outcome = tokio::time::timeout(self.exchange_timeout, async {
+            eprintln!(
+                "[demo-extproc] phase={} session_id={} waiting for controller decision",
+                request_phase_to_string(phase),
+                session_id
+            );
             let mut response = handle.response.lock().await;
             let maybe = response.message().await.map_err(|e| {
                 eprintln!(
@@ -313,8 +363,9 @@ impl DemoRequestProcessor {
             .send_phase_and_decide(ctx, phase, session_id, snapshot)
             .await?;
         let Some(decision) = decision else {
-            // The controller closed the phase stream without a decision; the
-            // phase completes without one.
+            // The controller closed the phase stream without a decision; complete
+            // the phase without one and keep the exchange flowing by continuing.
+            ctx.continue_request()?;
             return Ok(());
         };
         if let Some(action) = decision.action {
@@ -350,6 +401,10 @@ impl DemoRequestProcessor {
                     )?;
                 }
             }
+        } else {
+            // No action was issued for this phase; keep the exchange flowing by
+            // continuing without applying any mutations.
+            ctx.continue_request()?;
         }
         Ok(())
     }
