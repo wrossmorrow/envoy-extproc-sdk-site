@@ -30,7 +30,7 @@ const (
 // DemoControllerService manages interactive extproc sessions for the demo site.
 type DemoControllerServiceClient interface {
 	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase NOT_STARTED; the browser
+	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
 	// then sends the envoy-bound request carrying that session id and receives
 	// phase updates as the session resolves.
 	CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CreateSessionResponse], error)
@@ -82,7 +82,7 @@ func (c *demoControllerServiceClient) SubmitDecision(ctx context.Context, in *Su
 // DemoControllerService manages interactive extproc sessions for the demo site.
 type DemoControllerServiceServer interface {
 	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase NOT_STARTED; the browser
+	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
 	// then sends the envoy-bound request carrying that session id and receives
 	// phase updates as the session resolves.
 	CreateSession(*CreateSessionRequest, grpc.ServerStreamingServer[CreateSessionResponse]) error

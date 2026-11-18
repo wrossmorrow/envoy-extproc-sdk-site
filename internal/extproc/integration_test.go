@@ -138,7 +138,7 @@ func (e *flowEnv) connectControllerClient() v1connect.DemoControllerServiceClien
 }
 
 // createSession opens a human-facing CreateSession server stream, reads the
-// first update (session id + phase PHASE_NOT_STARTED), and returns the stream
+// first update (session id + phase PHASE_UNSPECIFIED), and returns the stream
 // positioned to receive subsequent phase updates.
 func (e *flowEnv) createSession(ctx context.Context) (*connect.ServerStreamForClient[v1.CreateSessionResponse], string, error) {
 	client := e.connectControllerClient()
@@ -471,7 +471,7 @@ func TestFlow_HumanDecisionValidation(t *testing.T) {
 	e := newFlowEnv(t, 50421, 9341)
 
 	// Decision for an unknown session is rejected.
-	if err := e.submitHumanDecision(ctx, "session-does-not-exist", v1.Phase_PHASE_NOT_STARTED, "continue"); err == nil {
+	if err := e.submitHumanDecision(ctx, "session-does-not-exist", v1.Phase_PHASE_UNSPECIFIED, "continue"); err == nil {
 		t.Fatalf("integration: submit decision for unknown session: error = nil, want error")
 	}
 
@@ -481,7 +481,7 @@ func TestFlow_HumanDecisionValidation(t *testing.T) {
 		t.Fatalf("integration: create session: %v", err)
 	}
 	defer func() { _ = stream.Close() }()
-	if err := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_NOT_STARTED, "continue"); err == nil {
+	if err := e.submitHumanDecision(ctx, sessionID, v1.Phase_PHASE_UNSPECIFIED, "continue"); err == nil {
 		t.Fatalf("integration: submit decision for session not in flight: error = nil, want error")
 	}
 

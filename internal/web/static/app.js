@@ -30,7 +30,7 @@ const FALLBACK_PHASE_TIMEOUT_MS = 30000;
 const AVAILABLE_LANGS = { go: true, rust: true, java: false, python: false };
 const LANG_NAMES = { go: "Go", rust: "Rust", java: "Java", python: "Python" };
 
-const PHASE_NOT_STARTED = "PHASE_NOT_STARTED";
+const PHASE_UNSPECIFIED = "PHASE_UNSPECIFIED";
 const PHASE_LABELS = {
   PHASE_REQUEST_HEADERS: "request headers",
   PHASE_REQUEST_BODY: "request body",
@@ -225,7 +225,7 @@ function handleUpdate(update) {
     return;
   }
   const phase = update.phase;
-  if (!phase || phase === PHASE_NOT_STARTED) return;
+  if (!phase || phase === PHASE_UNSPECIFIED) return;
 
   // A new phase means the previous one was released, i.e. our decision landed
   // even if its SubmitDecision response hasn't arrived yet.

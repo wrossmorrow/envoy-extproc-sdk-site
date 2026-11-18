@@ -25,37 +25,38 @@ const (
 type Phase int32
 
 const (
+	// PHASE_UNSPECIFIED is the pre-phase slot: the session is waiting for the
+	// envoy-bound request to enter its first phase. Real phases are numbered to
+	// align with envoy's ext_proc phase values (1 = REQUEST_HEADERS, ..., 6 =
+	// RESPONSE_TRAILERS).
 	Phase_PHASE_UNSPECIFIED       Phase = 0
-	Phase_PHASE_NOT_STARTED       Phase = 1
-	Phase_PHASE_REQUEST_HEADERS   Phase = 2
-	Phase_PHASE_REQUEST_BODY      Phase = 3
-	Phase_PHASE_REQUEST_TRAILERS  Phase = 4
-	Phase_PHASE_RESPONSE_HEADERS  Phase = 5
-	Phase_PHASE_RESPONSE_BODY     Phase = 6
-	Phase_PHASE_RESPONSE_TRAILERS Phase = 7
+	Phase_PHASE_REQUEST_HEADERS   Phase = 1
+	Phase_PHASE_REQUEST_BODY      Phase = 2
+	Phase_PHASE_REQUEST_TRAILERS  Phase = 3
+	Phase_PHASE_RESPONSE_HEADERS  Phase = 4
+	Phase_PHASE_RESPONSE_BODY     Phase = 5
+	Phase_PHASE_RESPONSE_TRAILERS Phase = 6
 )
 
 // Enum value maps for Phase.
 var (
 	Phase_name = map[int32]string{
 		0: "PHASE_UNSPECIFIED",
-		1: "PHASE_NOT_STARTED",
-		2: "PHASE_REQUEST_HEADERS",
-		3: "PHASE_REQUEST_BODY",
-		4: "PHASE_REQUEST_TRAILERS",
-		5: "PHASE_RESPONSE_HEADERS",
-		6: "PHASE_RESPONSE_BODY",
-		7: "PHASE_RESPONSE_TRAILERS",
+		1: "PHASE_REQUEST_HEADERS",
+		2: "PHASE_REQUEST_BODY",
+		3: "PHASE_REQUEST_TRAILERS",
+		4: "PHASE_RESPONSE_HEADERS",
+		5: "PHASE_RESPONSE_BODY",
+		6: "PHASE_RESPONSE_TRAILERS",
 	}
 	Phase_value = map[string]int32{
 		"PHASE_UNSPECIFIED":       0,
-		"PHASE_NOT_STARTED":       1,
-		"PHASE_REQUEST_HEADERS":   2,
-		"PHASE_REQUEST_BODY":      3,
-		"PHASE_REQUEST_TRAILERS":  4,
-		"PHASE_RESPONSE_HEADERS":  5,
-		"PHASE_RESPONSE_BODY":     6,
-		"PHASE_RESPONSE_TRAILERS": 7,
+		"PHASE_REQUEST_HEADERS":   1,
+		"PHASE_REQUEST_BODY":      2,
+		"PHASE_REQUEST_TRAILERS":  3,
+		"PHASE_RESPONSE_HEADERS":  4,
+		"PHASE_RESPONSE_BODY":     5,
+		"PHASE_RESPONSE_TRAILERS": 6,
 	}
 )
 
@@ -788,16 +789,15 @@ const file_controller_v1_controller_proto_rawDesc = "" +
 	"\aheaders\x18\x03 \x03(\v2\".controller.v1.Cancel.HeadersEntryR\aheaders\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xd6\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xbf\x01\n" +
 	"\x05Phase\x12\x15\n" +
-	"\x11PHASE_UNSPECIFIED\x10\x00\x12\x15\n" +
-	"\x11PHASE_NOT_STARTED\x10\x01\x12\x19\n" +
-	"\x15PHASE_REQUEST_HEADERS\x10\x02\x12\x16\n" +
-	"\x12PHASE_REQUEST_BODY\x10\x03\x12\x1a\n" +
-	"\x16PHASE_REQUEST_TRAILERS\x10\x04\x12\x1a\n" +
-	"\x16PHASE_RESPONSE_HEADERS\x10\x05\x12\x17\n" +
-	"\x13PHASE_RESPONSE_BODY\x10\x06\x12\x1b\n" +
-	"\x17PHASE_RESPONSE_TRAILERS\x10\a2\xd4\x01\n" +
+	"\x11PHASE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15PHASE_REQUEST_HEADERS\x10\x01\x12\x16\n" +
+	"\x12PHASE_REQUEST_BODY\x10\x02\x12\x1a\n" +
+	"\x16PHASE_REQUEST_TRAILERS\x10\x03\x12\x1a\n" +
+	"\x16PHASE_RESPONSE_HEADERS\x10\x04\x12\x17\n" +
+	"\x13PHASE_RESPONSE_BODY\x10\x05\x12\x1b\n" +
+	"\x17PHASE_RESPONSE_TRAILERS\x10\x062\xd4\x01\n" +
 	"\x15DemoControllerService\x12\\\n" +
 	"\rCreateSession\x12#.controller.v1.CreateSessionRequest\x1a$.controller.v1.CreateSessionResponse0\x01\x12]\n" +
 	"\x0eSubmitDecision\x12$.controller.v1.SubmitDecisionRequest\x1a%.controller.v1.SubmitDecisionResponse2d\n" +

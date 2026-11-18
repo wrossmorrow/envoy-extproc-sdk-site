@@ -19,7 +19,7 @@ type DemoControllerGRPCServer struct {
 }
 
 // CreateSession opens a server-streaming RPC that sends session updates. The
-// first CreateSessionResponse carries the session id with phase PHASE_NOT_STARTED
+// first CreateSessionResponse carries the session id with phase PHASE_UNSPECIFIED
 // and the phase decision deadline.
 func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, stream grpc.ServerStreamingServer[v1.CreateSessionResponse]) error {
 	sess, err := s.Controller.CreateSession()
@@ -28,7 +28,7 @@ func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, s
 	}
 	if err := stream.Send(&v1.CreateSessionResponse{
 		SessionId: sess.ID,
-		Phase:     v1.Phase_PHASE_NOT_STARTED,
+		Phase:     v1.Phase_PHASE_UNSPECIFIED,
 		Deadline:  timestamppb.New(sess.PhaseDeadline),
 	}); err != nil {
 		return err
@@ -75,7 +75,7 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 
 		// A phase update means the session is now in flight at that phase; await
 		// the human decision (or phase timeout) and reply over the stream.
-		phase := phaseFromExtproc(int32(update.Phase))
+		phase := v1.Phase(update.Phase)
 		inFlight, inErr := s.Controller.SessionInFlight(update.SessionId)
 		if inErr == nil && inFlight {
 			// The session already has an exchange in flight: reject the phase
