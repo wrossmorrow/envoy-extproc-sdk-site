@@ -42,13 +42,27 @@ pub struct DemoRequestProcessor {
 impl DemoRequestProcessor {
     pub fn new(controller_addr: &str) -> Self {
         Self {
-            controller_addr: controller_addr.to_string(),
+            controller_addr: Self::controller_endpoint(controller_addr),
             options: ProcessingOptions {
                 abort_on_processor_failure: true,
                 ..Default::default()
             },
             exchange_timeout: DEFAULT_EXCHANGE_TIMEOUT,
             controller: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Normalize a controller gRPC endpoint for the tonic client. tonic
+    /// endpoint URLs require a scheme (e.g. `http://controller:9093`); a bare
+    /// host such as `controller:9093` is rejected with `invalid URL, scheme is
+    /// missing`, so the controller phase stream can never be opened and the
+    /// controller is never contacted. Prefix the default scheme when the
+    /// address does not carry one.
+    fn controller_endpoint(addr: &str) -> String {
+        if addr.contains("://") {
+            addr.to_string()
+        } else {
+            format!("http://{}", addr)
         }
     }
 
