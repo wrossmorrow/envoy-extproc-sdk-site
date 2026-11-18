@@ -94,6 +94,7 @@ impl DemoRequestProcessor {
             tx,
             response: std::sync::Arc::new(tokio::sync::Mutex::new(response)),
         };
+        eprintln!("[demo-extproc] controller phase stream established");
         ctx.set_value::<Option<ControllerPhaseStream>>(Some(handle.clone()))?;
         Ok(Some(handle))
     }
