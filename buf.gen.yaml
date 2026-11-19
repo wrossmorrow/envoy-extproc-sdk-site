@@ -5,27 +5,30 @@ managed:
     - file_option: go_package_prefix
       value: github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go
 plugins:
-  # Buf remote plugins: buf fetches and runs these from the Buf Schema Registry, so the Go
-  # codegen path needs no locally installed protoc-gen-* binaries.
-  - remote: buf.build/protocolbuffers/go:v1.36.12
+  # Go (matches your go.mod / go tool plugins)
+  - remote: buf.build/protocolbuffers/go:v1.36.5
     out: gen/go
     opt: paths=source_relative
-  - remote: buf.build/grpc/go:v1.6.2
+  - remote: buf.build/grpc/go:v1.5.1
     out: gen/go
     opt: paths=source_relative
-  # Buf hosts a connect plugin, but only the v2 line (it emits connectrpc.com/connect/v2); the
-  # demo speaks connect v1, so this entry stays a local plugin for now.
-  - local: ["go", "tool", "protoc-gen-connect-go"]
+  - remote: buf.build/connectrpc/go:v1.18.1
     out: gen/go
     opt: paths=source_relative
-  - local: ["protoc-gen-tonic-prost"]
+
+  # Rust (prost 0.14 + tonic 0.14 / tonic-prost 0.14, flat output -> controller.v1.rs)
+  - remote: buf.build/community/neoeinstein-prost:v0.5.0
     out: gen/rust
-  # envoy ext_proc controller service -> java gRPC client/server code
-  - local: ["protoc-gen-grpc-java"]
+    opt:
+      - flat_output_dir
+      - type_attribute=.=#[allow(clippy::all)]
+  - remote: buf.build/community/neoeinstein-tonic:v0.5.0
+    out: gen/rust
+    opt:
+      - flat_output_dir
+
+  # Java (protobuf 3.21.x compatible + grpc-java)
+  - remote: buf.build/protocolbuffers/java:v21.12
     out: gen/java
-  # envoy ext_proc controller messages -> java protobuf messages. The envoy ext_proc SDK (and the
-  # envoy gencode it ships) are built against protobuf 3.x, so the Java generator must run with a
-  # protobuf 3.x protoc binary (e.g. 3.21.x); protoc_path points at the protoc binary on PATH.
-  - protoc_builtin: java
+  - remote: buf.build/grpc/java:v1.68.1
     out: gen/java
-    protoc_path: protoc
