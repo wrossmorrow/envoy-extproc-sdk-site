@@ -93,6 +93,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.java
+      args:
+        GITHUB_ACTOR: ${GITHUB_ACTOR:-}
+      secrets:
+        - github_token
     ports:
       - "50053:50051"
       - "9096:9090"
@@ -104,6 +108,10 @@ services:
       start_period: 3s
     networks:
       - demo
+
+secrets:
+  github_token:
+    file: ./github_token
 
 networks:
   demo: {}
