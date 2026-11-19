@@ -99,7 +99,10 @@ containerize-java tag=image_tag:
         -t {{ image_name }}-extproc-java:{{ tag }} .
 
 # bring up compose
-up *flags="": gen
+up *flags="":
+    #!/bin/bash
+    export GITHUB_ACTOR="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.user=([^ ]+)[ ]*$/\1/p' )"
+    export GITHUB_TOKEN="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.key=([^ ]+)[ ]*$/\1/p' )"
     docker compose up --build {{flags}}
 
 # bring down compose
