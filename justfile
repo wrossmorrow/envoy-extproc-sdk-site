@@ -89,7 +89,11 @@ containerize-rust tag=image_tag:
 
 # containerize the java demo extproc
 containerize-java tag=image_tag:
-    docker build -f Dockerfile.java -t {{ image_name }}-extproc-java:{{ tag }} .
+    docker build \
+        --build-arg GITHUB_ACTOR=$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.user=([^ ]+)[ ]*$/\1/p' ) \
+        --build-arg GITHUB_TOKEN=$( cat /run/secrets/github-token 2>/dev/null || echo "" ) \
+        -f Dockerfile.java \
+        -t {{ image_name }}-extproc-java:{{ tag }} .
 
 # bring up compose
 up *flags="": gen
