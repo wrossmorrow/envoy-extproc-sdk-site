@@ -64,6 +64,7 @@ public class DemoRequestProcessor implements RequestProcessor {
   static final String CONTROLLER_STREAM_KEY = "controllerDemoStream";
   static final String CONTROLLER_RESPONSE_KEY = "controllerDemoResponseObserver";
   static final String CONTROLLER_DECISIONS_KEY = "controllerDemoDecisions";
+  static final String CONTROLLER_DECISION_RECEIVED_KEY = "controllerDemoDecisionReceived";
   static final String CONTROLLER_SESSION_ID_KEY = "controllerDemoSessionID";
   static final String SNAPSHOT_NAMES_KEY = "controllerDemoSnapshotHeaderNames";
   static final String CONTROLLER_CALL_KEY = "controllerDemoCall";
@@ -314,6 +315,12 @@ public class DemoRequestProcessor implements RequestProcessor {
     if (decisions == null) {
       ctx.setValue(CONTROLLER_DECISIONS_KEY, phaseDecisions);
     }
+    Object decisionReceivedValue = ctx.getValue(CONTROLLER_DECISION_RECEIVED_KEY);
+    final java.util.concurrent.atomic.AtomicBoolean decisionReceived =
+        decisionReceivedValue instanceof java.util.concurrent.atomic.AtomicBoolean
+            ? (java.util.concurrent.atomic.AtomicBoolean) decisionReceivedValue
+            : new java.util.concurrent.atomic.AtomicBoolean();
+    ctx.setValue(CONTROLLER_DECISION_RECEIVED_KEY, decisionReceived);
     StreamObserver<ProcessResponse> responseObserver =
         (StreamObserver<ProcessResponse>) ctx.getValue(CONTROLLER_RESPONSE_KEY);
     if (responseObserver == null) {
@@ -322,21 +329,30 @@ public class DemoRequestProcessor implements RequestProcessor {
             @Override
             public void onNext(ProcessResponse value) {
               phaseDecisions.offer(value);
+              decisionReceived.set(true);
             }
 
             @Override
             public void onError(Throwable t) {
               phaseDecisions.offer(t);
+              decisionReceived.set(true);
             }
 
             @Override
             public void onCompleted() {
-              phaseDecisions.offer(
-                  new IllegalStateException("controller closed phase stream without a decision"));
+              // The controller may close the phase stream right after sending a decision (e.g. a
+              // final phase); only report a missing decision when nothing was sent for the phase.
+              if (!decisionReceived.get()) {
+                phaseDecisions.offer(
+                    new IllegalStateException("controller closed phase stream without a decision"));
+              }
             }
           };
       ctx.setValue(CONTROLLER_RESPONSE_KEY, responseObserver);
     }
+    // Phases are resolved one at a time over this stream, so clear any decision received for a
+    // previous phase before asking for the next one.
+    decisionReceived.set(false);
     StreamObserver<ProcessRequest> sender = controllerStream(ctx, responseObserver);
     sender.onNext(
         ProcessRequest.newBuilder()
@@ -404,8 +420,8 @@ public class DemoRequestProcessor implements RequestProcessor {
   }
 
   /**
-   * Logs a phase decision received from the controller for the phase being resolved, including
-   * the body mutation and header changes the decision carries.
+   * Logs a phase decision received from the controller for the phase being resolved, including the
+   * body mutation and header changes the decision carries.
    */
   protected void logPhaseDecisionReceived(RequestCase phase, Decision action) {
     String phaseName = phaseName(phase);
@@ -450,9 +466,7 @@ public class DemoRequestProcessor implements RequestProcessor {
   protected void logPhaseDecisionSent(RequestCase phase, Continue continueDecision) {
     String phaseName = phaseName(phase);
     ResponseStatus envoyStatus =
-        continueDecision.hasBody()
-            ? ResponseStatus.CONTINUE_AND_REPLACE
-            : ResponseStatus.CONTINUE;
+        continueDecision.hasBody() ? ResponseStatus.CONTINUE_AND_REPLACE : ResponseStatus.CONTINUE;
     logger.info(
         "Demo processor phase decision sent to envoy: phase="
             + phaseName
@@ -477,6 +491,7 @@ public class DemoRequestProcessor implements RequestProcessor {
     ctx.setValue(CONTROLLER_STREAM_KEY, null);
     ctx.setValue(CONTROLLER_RESPONSE_KEY, null);
     ctx.setValue(CONTROLLER_DECISIONS_KEY, null);
+    ctx.setValue(CONTROLLER_DECISION_RECEIVED_KEY, null);
     ClientCall<ProcessRequest, ProcessResponse> call =
         (ClientCall<ProcessRequest, ProcessResponse>) ctx.getValue(CONTROLLER_CALL_KEY);
     if (call != null) {
