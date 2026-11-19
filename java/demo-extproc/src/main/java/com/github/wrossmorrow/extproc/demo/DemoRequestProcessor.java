@@ -385,6 +385,9 @@ public class DemoRequestProcessor implements RequestProcessor {
     }
     if (continueDecision.hasBody()) {
       ctx.replaceBody(continueDecision.getBody().toByteArray());
+      // Envoy only applies body mutations on a CONTINUE_AND_REPLACE decision; a plain CONTINUE
+      // leaves the phase response without replace semantics while still carrying the mutation.
+      ctx.continueAndReplace();
     }
     Map<String, String> continueHeaders = continueDecision.getHeaders();
     for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {

@@ -1,6 +1,8 @@
 package com.github.wrossmorrow.extproc.demo;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,6 +17,7 @@ import build.buf.gen.envoy.service.ext_proc.v3.ImmediateResponse;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingRequest;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingResponse;
 import com.controller.v1.Phase;
+import com.google.protobuf.ByteString;
 import com.github.wrossmorrow.extproc.ExternalProcessorServer;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -22,6 +25,7 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 import java.net.ServerSocket;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Queue;
@@ -177,6 +181,94 @@ class DemoProcessorExchangeTest {
     assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
     HeaderMutation mutation = response.getRequestHeaders().getResponse().getHeaderMutation();
     assertTrue(hasProcessedHeader(mutation), "expected the demo to set x-demo-processed");
+  }
+
+  @Test
+  void demoContinuesRequestHeadersWithoutBodyAsPlainContinue() throws Exception {
+    forcedDecision =
+        com.controller.v1.Decision.newBuilder()
+            .setContinue(com.controller.v1.Continue.newBuilder().build())
+            .build();
+
+    Map<String, String> headers = new HashMap<>();
+    headers.put("x-demo-session-id", "sess-5");
+    headers.put(":method", "GET");
+    headers.put(":path", "/health");
+    ProcessingRequest request =
+        envoyRequest(ProcessingRequest.RequestCase.REQUEST_HEADERS, headers, true);
+
+    StreamObserver<ProcessingResponse> responseObserver =
+        new StreamObserver<ProcessingResponse>() {
+          @Override
+          public void onNext(ProcessingResponse value) {
+            exchangeResponse.add(value);
+          }
+
+          @Override
+          public void onError(Throwable t) {
+            exchangeError.set(t);
+          }
+
+          @Override
+          public void onCompleted() {
+            // the exchange is finalized by the decision that was applied
+          }
+        };
+    StreamObserver<ProcessingRequest> sender = extProcStub.process(responseObserver);
+    sender.onNext(request);
+    ProcessingResponse response = awaitExchangeResponse(10);
+
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
+    assertFalse(response.getRequestHeaders().getResponse().hasBodyMutation());
+  }
+
+  @Test
+  void demoContinuesRequestHeadersWithBodyAsContinueAndReplace() throws Exception {
+    forcedDecision =
+        com.controller.v1.Decision.newBuilder()
+            .setContinue(
+                com.controller.v1.Continue.newBuilder()
+                    .setBody(ByteString.copyFromUtf8("rewritten-body"))
+                    .build())
+            .build();
+
+    Map<String, String> headers = new HashMap<>();
+    headers.put("x-demo-session-id", "sess-6");
+    headers.put(":method", "POST");
+    headers.put(":path", "/submit");
+    ProcessingRequest request =
+        envoyRequest(ProcessingRequest.RequestCase.REQUEST_HEADERS, headers, false);
+
+    StreamObserver<ProcessingResponse> responseObserver =
+        new StreamObserver<ProcessingResponse>() {
+          @Override
+          public void onNext(ProcessingResponse value) {
+            exchangeResponse.add(value);
+          }
+
+          @Override
+          public void onError(Throwable t) {
+            exchangeError.set(t);
+          }
+
+          @Override
+          public void onCompleted() {
+            // the exchange is finalized by the decision that was applied
+          }
+        };
+    StreamObserver<ProcessingRequest> sender = extProcStub.process(responseObserver);
+    sender.onNext(request);
+    ProcessingResponse response = awaitExchangeResponse(10);
+
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
+    assertEquals(
+        ResponseStatus.CONTINUE_AND_REPLACE,
+        response.getRequestHeaders().getResponse().getStatus());
+    assertTrue(response.getRequestHeaders().getResponse().hasBodyMutation());
+    assertArrayEquals(
+        "rewritten-body".getBytes(StandardCharsets.UTF_8),
+        response.getRequestHeaders().getResponse().getBodyMutation().getBody().toByteArray());
   }
 
   @Test
