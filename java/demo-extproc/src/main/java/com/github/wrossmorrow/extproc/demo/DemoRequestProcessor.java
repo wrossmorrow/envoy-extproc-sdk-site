@@ -28,6 +28,7 @@ import io.grpc.stub.StreamObserver;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -224,11 +225,12 @@ public class DemoRequestProcessor implements RequestProcessor {
   public void errorHandler(RequestContext ctx, RequestCase phase, Throwable err) {
     if (isStreamCancelled(err)) {
       // Envoy tore the downstream down and cancelled the extproc stream; treat it as the
-      // cancellation signal for this exchange phase and clean up the controller stream handle
-      // held in the request context.
-      retireStream(ctx);
+      // cancellation signal for this exchange phase and abort the controller stream handle held in
+      // the request context.
+      abortStream(ctx, "downstream extproc stream cancelled", err);
       return;
     }
+    abortStream(ctx, "demo processor error", err);
     logger.severe(
         "Demo processor error: phase="
             + phaseName(phase)
@@ -284,19 +286,24 @@ public class DemoRequestProcessor implements RequestProcessor {
       retireStream(ctx);
       Cancel cancelDecision = action.getCancel();
       ctx.cancelRequest(
-          cancelDecision.getStatus(), cancelDecision.getHeaders(), cancelDecision.getBody());
+          cancelDecision.getStatus(),
+          filterMutableHeaders(cancelDecision.getHeaders()),
+          cancelDecision.getBody());
       return;
     }
+    boolean replacedResponseOnHeaders = false;
     if (action != null && action.getActionCase() == Decision.ActionCase.CONTINUE) {
       Continue continueDecision = action.getContinue();
       applyDecision(ctx, phase, continueDecision);
       logPhaseDecisionSent(phase, continueDecision);
+      replacedResponseOnHeaders =
+          phase == RequestCase.RESPONSE_HEADERS && continueDecision.hasBody();
     }
-    if (responsePhase && endOfStream) {
-      // The phase signaled end-of-stream during a response phase, which marks the end of the
-      // direction the demo retires on. End-of-stream marks the end of a single direction (e.g. the
-      // request headers for a bodyless GET, or the final request body for a POST), not the end of
-      // the exchange, so retire and finalize only when a response phase signaled end-of-stream.
+    if (responsePhase && (endOfStream || replacedResponseOnHeaders)) {
+      // Finalize and retire the controller stream when a response phase ends the exchange: either
+      // Envoy signaled end-of-stream on the response direction, or RESPONSE_HEADERS returned
+      // CONTINUE_AND_REPLACE with a replacement body (in which case Envoy replaces the response
+      // body immediately and never sends RESPONSE_BODY even though end_of_stream was false).
       retireStream(ctx);
       ctx.setProcessingComplete();
     }
@@ -353,26 +360,37 @@ public class DemoRequestProcessor implements RequestProcessor {
     // previous phase before asking for the next one.
     decisionReceived.set(false);
     StreamObserver<ProcessRequest> sender = controllerStream(ctx, responseObserver);
-    sender.onNext(
-        ProcessRequest.newBuilder()
-            .setSessionId(sessionID)
-            .setPhase(phaseOf(phase))
-            .setSnapshot(snapshot)
-            .build());
+    try {
+      sender.onNext(
+          ProcessRequest.newBuilder()
+              .setSessionId(sessionID)
+              .setPhase(phaseOf(phase))
+              .setSnapshot(snapshot)
+              .build());
+    } catch (RuntimeException e) {
+      abortStream(ctx, "failed to send phase update to controller", e);
+      throw e;
+    }
     try {
       Object next = phaseDecisions.poll(exchangeTimeoutSeconds, TimeUnit.SECONDS);
       if (next == null) {
-        throw new RuntimeException("timed out waiting for controller decision");
+        RuntimeException timeout =
+            new RuntimeException("timed out waiting for controller decision");
+        abortStream(ctx, "timed out waiting for controller decision", timeout);
+        throw timeout;
       }
       if (next instanceof RuntimeException e) {
+        abortStream(ctx, "controller phase exchange failed", e);
         throw e;
       }
       if (next instanceof Throwable t) {
+        abortStream(ctx, "controller phase exchange failed", t);
         throw new RuntimeException("controller phase exchange failed", t);
       }
       return (ProcessResponse) next;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      abortStream(ctx, "interrupted waiting for controller decision", e);
       throw new RuntimeException("timed out waiting for controller decision", e);
     }
   }
@@ -402,28 +420,75 @@ public class DemoRequestProcessor implements RequestProcessor {
   }
 
   protected void applyDecision(RequestContext ctx, RequestCase phase, Continue continueDecision) {
-    // Header mutations are only meaningful for the headers phases; body and trailers phases must
-    // not carry HeaderMutations.
-    if (isHeadersPhase(phase)) {
-      if (continueDecision.getRemoveHeadersList().size() > 0) {
-        ctx.removeHeaders(continueDecision.getRemoveHeadersList());
+    // Header mutations apply to headers and trailers phases only; body phases must not carry
+    // HeaderMutations (for instance, the web UI keeps sticky set-headers across phases).
+    // Disallowed HTTP/2 ':pseudo-headers' (such as :method, :path, :status, :authority echoed from
+    // snapshots) are filtered out because Envoy rejects them under default HeaderMutationRules.
+    if (isHeadersPhase(phase) || isTrailersPhase(phase)) {
+      List<String> removable = filterMutableHeaderNames(continueDecision.getRemoveHeadersList());
+      if (!removable.isEmpty()) {
+        ctx.removeHeaders(removable);
       }
-      Map<String, String> continueHeaders = continueDecision.getHeaders();
+      Map<String, String> continueHeaders = filterMutableHeaders(continueDecision.getHeaders());
       for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
         ctx.overwriteHeader(entry.getKey(), entry.getValue());
       }
-      ctx.addHeader(PROCESSED_HEADER, "true");
-    }
-    if (continueDecision.hasBody()) {
-      ctx.replaceBody(continueDecision.getBody().toByteArray());
-      // Envoy applies body mutations on a CONTINUE_AND_REPLACE decision. CONTINUE_AND_REPLACE is
-      // only valid for the headers phases (where envoy may replace or add a body before it has
-      // buffered one); for body phases the mutation rides on a plain CONTINUE, so only upgrade to
-      // CONTINUE_AND_REPLACE outside of body phases.
       if (isHeadersPhase(phase)) {
-        ctx.continueAndReplace();
+        ctx.addHeader(PROCESSED_HEADER, "true");
       }
     }
+    if (continueDecision.hasBody()) {
+      byte[] bodyBytes = continueDecision.getBody().toByteArray();
+      if (isHeadersPhase(phase)) {
+        // In envoy-extproc-sdk-java 0.3.1-alpha2+, replaceBody(byte[]) delegates 0-length arrays
+        // to clearBody() and updates content-length when RequestContext is in a headers phase.
+        // Envoy requires CONTINUE_AND_REPLACE to apply body mutations from a headers phase.
+        ctx.replaceBody(bodyBytes);
+        ctx.continueAndReplace();
+      } else if (isBodyPhase(phase)) {
+        // For body phases the mutation rides on a plain CONTINUE without HeaderMutations.
+        if (bodyBytes.length == 0) {
+          ctx.clearBodyChunk();
+        } else {
+          ctx.replaceBodyChunk(bodyBytes);
+        }
+      }
+      // Trailers phases ignore stray body mutations.
+    }
+  }
+
+  protected boolean isMutableHeaderName(String name) {
+    if (name == null) {
+      return false;
+    }
+    String trimmed = name.trim();
+    return !trimmed.isEmpty() && !trimmed.startsWith(":");
+  }
+
+  protected List<String> filterMutableHeaderNames(List<String> names) {
+    List<String> filtered = new ArrayList<>();
+    if (names == null) {
+      return filtered;
+    }
+    for (String name : names) {
+      if (isMutableHeaderName(name)) {
+        filtered.add(name.trim());
+      }
+    }
+    return filtered;
+  }
+
+  protected Map<String, String> filterMutableHeaders(Map<String, String> headers) {
+    Map<String, String> filtered = new LinkedHashMap<>();
+    if (headers == null) {
+      return filtered;
+    }
+    for (Map.Entry<String, String> entry : headers.entrySet()) {
+      if (isMutableHeaderName(entry.getKey()) && entry.getValue() != null) {
+        filtered.put(entry.getKey().trim(), entry.getValue());
+      }
+    }
+    return filtered;
   }
 
   /**
@@ -490,28 +555,34 @@ public class DemoRequestProcessor implements RequestProcessor {
   protected void retireStream(RequestContext ctx) {
     StreamObserver<ProcessRequest> sender =
         (StreamObserver<ProcessRequest>) ctx.getValue(CONTROLLER_STREAM_KEY);
+    clearControllerStreamState(ctx);
     if (sender != null) {
       try {
         sender.onCompleted();
       } catch (Exception e) {
-        // best effort retire of the controller phase stream
+        // best effort half-close of the controller phase stream
       }
     }
-    ctx.setValue(CONTROLLER_STREAM_KEY, null);
-    ctx.setValue(CONTROLLER_RESPONSE_KEY, null);
-    ctx.setValue(CONTROLLER_DECISIONS_KEY, null);
-    ctx.setValue(CONTROLLER_DECISION_RECEIVED_KEY, null);
+  }
+
+  protected void abortStream(RequestContext ctx, String reason, Throwable cause) {
     ClientCall<ProcessRequest, ProcessResponse> call =
         (ClientCall<ProcessRequest, ProcessResponse>) ctx.getValue(CONTROLLER_CALL_KEY);
+    clearControllerStreamState(ctx);
     if (call != null) {
       try {
-        call.cancel(
-            "controller phase stream retired",
-            new RuntimeException("controller phase stream retired"));
+        call.cancel(reason, cause);
       } catch (Exception e) {
         // best effort cancel of the controller phase call
       }
     }
+  }
+
+  private void clearControllerStreamState(RequestContext ctx) {
+    ctx.setValue(CONTROLLER_STREAM_KEY, null);
+    ctx.setValue(CONTROLLER_RESPONSE_KEY, null);
+    ctx.setValue(CONTROLLER_DECISIONS_KEY, null);
+    ctx.setValue(CONTROLLER_DECISION_RECEIVED_KEY, null);
     ctx.setValue(CONTROLLER_CALL_KEY, null);
   }
 
@@ -593,6 +664,9 @@ public class DemoRequestProcessor implements RequestProcessor {
   }
 
   protected boolean isHeadersPhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
     switch (phase) {
       case REQUEST_HEADERS:
       case RESPONSE_HEADERS:
@@ -602,7 +676,36 @@ public class DemoRequestProcessor implements RequestProcessor {
     }
   }
 
+  protected boolean isBodyPhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
+    switch (phase) {
+      case REQUEST_BODY:
+      case RESPONSE_BODY:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  protected boolean isTrailersPhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
+    switch (phase) {
+      case REQUEST_TRAILERS:
+      case RESPONSE_TRAILERS:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   protected boolean isResponsePhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
     switch (phase) {
       case RESPONSE_HEADERS:
       case RESPONSE_BODY:

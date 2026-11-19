@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import build.buf.gen.envoy.config.core.v3.HeaderValueOption;
 import build.buf.gen.envoy.service.ext_proc.v3.CommonResponse.ResponseStatus;
+import build.buf.gen.envoy.service.ext_proc.v3.HeaderMutation;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingRequest.RequestCase;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingResponse;
 import com.controller.v1.Continue;
@@ -164,16 +166,40 @@ class DemoRequestProcessorTest {
   }
 
   @Test
+  void continueDecisionWithEmptyBodyInHeadersPhaseClearsBodyWithContinueAndReplace() {
+    RequestContext ctx = new RequestContext();
+    PROCESSOR.applyDecision(
+        ctx, RequestCase.RESPONSE_HEADERS, Continue.newBuilder().setBody(ByteString.EMPTY).build());
+
+    ProcessingResponse response = ctx.getResponse(RequestCase.RESPONSE_HEADERS);
+    assertEquals(ProcessingResponse.ResponseCase.RESPONSE_HEADERS, response.getResponseCase());
+    assertEquals(
+        ResponseStatus.CONTINUE_AND_REPLACE,
+        response.getResponseHeaders().getResponse().getStatus());
+    assertTrue(response.getResponseHeaders().getResponse().hasBodyMutation());
+    assertTrue(response.getResponseHeaders().getResponse().getBodyMutation().getClearBody());
+    assertFalse(response.getResponseHeaders().getResponse().getBodyMutation().hasBody());
+  }
+
+  @Test
   void continueDecisionWithBodyInBodyPhaseYieldsPlainContinueWithoutReplace() {
     RequestContext ctx = new RequestContext();
     PROCESSOR.applyDecision(
         ctx,
         RequestCase.REQUEST_BODY,
-        Continue.newBuilder().setBody(ByteString.copyFromUtf8("rewritten-body")).build());
+        Continue.newBuilder()
+            .putHeaders("x-demo-intercepted", "true")
+            .putHeaders(":method", "POST")
+            .addRemoveHeaders("x-remove-me")
+            .setBody(ByteString.copyFromUtf8("rewritten-body"))
+            .build());
 
     ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_BODY);
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_BODY, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getRequestBody().getResponse().getStatus());
+    assertFalse(
+        response.getRequestBody().getResponse().hasHeaderMutation(),
+        "body phases must not carry HeaderMutations");
     assertTrue(response.getRequestBody().getResponse().hasBodyMutation());
     assertArrayEquals(
         "rewritten-body".getBytes(StandardCharsets.UTF_8),
@@ -181,7 +207,95 @@ class DemoRequestProcessorTest {
   }
 
   @Test
-  void headersPhaseDetectionCoversRequestAndResponseHeadersOnly() {
+  void continueDecisionWithEmptyBodyInBodyPhaseClearsBodyChunkWithPlainContinue() {
+    RequestContext ctx = new RequestContext();
+    PROCESSOR.applyDecision(
+        ctx, RequestCase.RESPONSE_BODY, Continue.newBuilder().setBody(ByteString.EMPTY).build());
+
+    ProcessingResponse response = ctx.getResponse(RequestCase.RESPONSE_BODY);
+    assertEquals(ProcessingResponse.ResponseCase.RESPONSE_BODY, response.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, response.getResponseBody().getResponse().getStatus());
+    assertFalse(response.getResponseBody().getResponse().hasHeaderMutation());
+    assertTrue(response.getResponseBody().getResponse().hasBodyMutation());
+    assertTrue(response.getResponseBody().getResponse().getBodyMutation().getClearBody());
+    assertFalse(response.getResponseBody().getResponse().getBodyMutation().hasBody());
+  }
+
+  @Test
+  void applyDecisionFiltersPseudoHeadersAndAttachesProcessedHeaderOnlyOnHeadersPhases() {
+    Continue decision =
+        Continue.newBuilder()
+            .putHeaders(":method", "DELETE")
+            .putHeaders(":path", "/rewritten")
+            .putHeaders(":status", "201")
+            .putHeaders(":authority", "evil.example")
+            .putHeaders("x-custom", "allowed")
+            .addRemoveHeaders(":method")
+            .addRemoveHeaders(":status")
+            .addRemoveHeaders("x-drop")
+            .build();
+
+    RequestContext reqHeadersCtx = new RequestContext();
+    PROCESSOR.applyDecision(reqHeadersCtx, RequestCase.REQUEST_HEADERS, decision);
+    HeaderMutation reqMutation =
+        reqHeadersCtx
+            .getResponse(RequestCase.REQUEST_HEADERS)
+            .getRequestHeaders()
+            .getResponse()
+            .getHeaderMutation();
+    assertTrue(hasSetHeader(reqMutation, "x-custom", "allowed"));
+    assertTrue(hasSetHeader(reqMutation, DemoRequestProcessor.PROCESSED_HEADER, "true"));
+    assertFalse(hasAnyPseudoHeader(reqMutation));
+    assertEquals(List.of("x-drop"), reqMutation.getRemoveHeadersList());
+
+    RequestContext respHeadersCtx = new RequestContext();
+    PROCESSOR.applyDecision(respHeadersCtx, RequestCase.RESPONSE_HEADERS, decision);
+    HeaderMutation respMutation =
+        respHeadersCtx
+            .getResponse(RequestCase.RESPONSE_HEADERS)
+            .getResponseHeaders()
+            .getResponse()
+            .getHeaderMutation();
+    assertTrue(hasSetHeader(respMutation, "x-custom", "allowed"));
+    assertTrue(hasSetHeader(respMutation, DemoRequestProcessor.PROCESSED_HEADER, "true"));
+    assertFalse(hasAnyPseudoHeader(respMutation));
+    assertEquals(List.of("x-drop"), respMutation.getRemoveHeadersList());
+  }
+
+  @Test
+  void trailersPhasesApplyFilteredHeaderMutationsWithoutProcessedHeaderOrBodyMutation() {
+    Continue decision =
+        Continue.newBuilder()
+            .putHeaders(":status", "200")
+            .putHeaders("x-trailer-checksum", "abc123")
+            .addRemoveHeaders(":path")
+            .addRemoveHeaders("x-old-trailer")
+            .setBody(ByteString.copyFromUtf8("stray-body"))
+            .build();
+
+    RequestContext reqTrailersCtx = new RequestContext();
+    PROCESSOR.applyDecision(reqTrailersCtx, RequestCase.REQUEST_TRAILERS, decision);
+    ProcessingResponse reqResp = reqTrailersCtx.getResponse(RequestCase.REQUEST_TRAILERS);
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_TRAILERS, reqResp.getResponseCase());
+    HeaderMutation reqMutation = reqResp.getRequestTrailers().getHeaderMutation();
+    assertTrue(hasSetHeader(reqMutation, "x-trailer-checksum", "abc123"));
+    assertFalse(hasSetHeader(reqMutation, DemoRequestProcessor.PROCESSED_HEADER, "true"));
+    assertFalse(hasAnyPseudoHeader(reqMutation));
+    assertEquals(List.of("x-old-trailer"), reqMutation.getRemoveHeadersList());
+
+    RequestContext respTrailersCtx = new RequestContext();
+    PROCESSOR.applyDecision(respTrailersCtx, RequestCase.RESPONSE_TRAILERS, decision);
+    ProcessingResponse respResp = respTrailersCtx.getResponse(RequestCase.RESPONSE_TRAILERS);
+    assertEquals(ProcessingResponse.ResponseCase.RESPONSE_TRAILERS, respResp.getResponseCase());
+    HeaderMutation respMutation = respResp.getResponseTrailers().getHeaderMutation();
+    assertTrue(hasSetHeader(respMutation, "x-trailer-checksum", "abc123"));
+    assertFalse(hasSetHeader(respMutation, DemoRequestProcessor.PROCESSED_HEADER, "true"));
+    assertFalse(hasAnyPseudoHeader(respMutation));
+    assertEquals(List.of("x-old-trailer"), respMutation.getRemoveHeadersList());
+  }
+
+  @Test
+  void phaseCategoryHelpersClassifyEveryRequestCase() {
     assertTrue(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_HEADERS));
     assertTrue(PROCESSOR.isHeadersPhase(RequestCase.RESPONSE_HEADERS));
     assertFalse(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_BODY));
@@ -189,6 +303,47 @@ class DemoRequestProcessorTest {
     assertFalse(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_TRAILERS));
     assertFalse(PROCESSOR.isHeadersPhase(RequestCase.RESPONSE_TRAILERS));
     assertFalse(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_NOT_SET));
+
+    assertTrue(PROCESSOR.isBodyPhase(RequestCase.REQUEST_BODY));
+    assertTrue(PROCESSOR.isBodyPhase(RequestCase.RESPONSE_BODY));
+    assertFalse(PROCESSOR.isBodyPhase(RequestCase.REQUEST_HEADERS));
+    assertFalse(PROCESSOR.isBodyPhase(RequestCase.RESPONSE_HEADERS));
+    assertFalse(PROCESSOR.isBodyPhase(RequestCase.REQUEST_TRAILERS));
+    assertFalse(PROCESSOR.isBodyPhase(RequestCase.RESPONSE_TRAILERS));
+
+    assertTrue(PROCESSOR.isTrailersPhase(RequestCase.REQUEST_TRAILERS));
+    assertTrue(PROCESSOR.isTrailersPhase(RequestCase.RESPONSE_TRAILERS));
+    assertFalse(PROCESSOR.isTrailersPhase(RequestCase.REQUEST_HEADERS));
+    assertFalse(PROCESSOR.isTrailersPhase(RequestCase.RESPONSE_HEADERS));
+    assertFalse(PROCESSOR.isTrailersPhase(RequestCase.REQUEST_BODY));
+    assertFalse(PROCESSOR.isTrailersPhase(RequestCase.RESPONSE_BODY));
+  }
+
+  private static boolean hasSetHeader(HeaderMutation mutation, String key, String expectedValue) {
+    for (HeaderValueOption opt : mutation.getSetHeadersList()) {
+      String actual =
+          !opt.getHeader().getValue().isEmpty()
+              ? opt.getHeader().getValue()
+              : opt.getHeader().getRawValue().toStringUtf8();
+      if (key.equals(opt.getHeader().getKey()) && expectedValue.equals(actual)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean hasAnyPseudoHeader(HeaderMutation mutation) {
+    for (HeaderValueOption opt : mutation.getSetHeadersList()) {
+      if (opt.getHeader().getKey().startsWith(":")) {
+        return true;
+      }
+    }
+    for (String removed : mutation.getRemoveHeadersList()) {
+      if (removed.startsWith(":")) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static Map<String, String> sortedHeaders() {
