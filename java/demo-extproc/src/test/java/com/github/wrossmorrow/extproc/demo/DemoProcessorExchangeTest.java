@@ -2,7 +2,6 @@ package com.github.wrossmorrow.extproc.demo;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -220,7 +219,8 @@ class DemoProcessorExchangeTest {
 
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
-    assertFalse(response.getRequestHeaders().getResponse().hasBodyMutation());
+    assertEquals(
+        0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
   }
 
   @Test
