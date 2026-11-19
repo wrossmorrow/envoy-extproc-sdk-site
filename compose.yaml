@@ -87,5 +87,23 @@ services:
     networks:
       - demo
 
+  # extproc (Java implementation), integrated with envoy and holds requests for interactive handling
+  extproc-java:
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-extproc-java:${EXTPROC_JAVA_VERSION:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+    ports:
+      - "50053:50051"
+      - "9096:9090"
+    healthcheck:
+      test: ["CMD", "/grpc-health-probe", "-addr=localhost:50051"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+    networks:
+      - demo
+
 networks:
   demo: {}

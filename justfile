@@ -87,6 +87,10 @@ java-sdk-install:
 containerize-rust tag=image_tag:
     docker build -f Dockerfile.rust -t {{ image_name }}-extproc:{{ tag }} .
 
+# containerize the java demo extproc
+containerize-java tag=image_tag:
+    docker build -f Dockerfile.java -t {{ image_name }}-extproc-java:{{ tag }} .
+
 # bring up compose
 up *flags="": gen
     docker compose up --build {{flags}}
