@@ -12,6 +12,7 @@ import build.buf.gen.envoy.config.core.v3.HeaderValueOption;
 import build.buf.gen.envoy.service.ext_proc.v3.CommonResponse.ResponseStatus;
 import build.buf.gen.envoy.service.ext_proc.v3.ExternalProcessorGrpc;
 import build.buf.gen.envoy.service.ext_proc.v3.HeaderMutation;
+import build.buf.gen.envoy.service.ext_proc.v3.HttpBody;
 import build.buf.gen.envoy.service.ext_proc.v3.HttpHeaders;
 import build.buf.gen.envoy.service.ext_proc.v3.ImmediateResponse;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingRequest;
@@ -385,6 +386,44 @@ class DemoProcessorExchangeTest {
     assertEquals(ResponseStatus.CONTINUE, second.getResponseHeaders().getResponse().getStatus());
   }
 
+  @Test
+  void demoAdvancesFromRequestBodyPhaseToResponseHeadersPhase() throws Exception {
+    Map<String, String> headers = new HashMap<>();
+    headers.put("x-demo-session-id", "sess-7");
+    headers.put(":method", "POST");
+    headers.put(":path", "/submit");
+    StreamObserver<ProcessingResponse> responseObserver =
+        new StreamObserver<ProcessingResponse>() {
+          @Override
+          public void onNext(ProcessingResponse value) {
+            exchangeResponse.add(value);
+          }
+
+          @Override
+          public void onError(Throwable t) {
+            exchangeError.set(t);
+          }
+
+          @Override
+          public void onCompleted() {
+            // the exchange is finalized by the decision that was applied
+          }
+        };
+    StreamObserver<ProcessingRequest> sender = extProcStub.process(responseObserver);
+    // The request direction ends during the request body phase (end of stream on the request).
+    sender.onNext(envoyRequest(ProcessingRequest.RequestCase.REQUEST_BODY, headers, true));
+    ProcessingResponse first = awaitExchangeResponse(10);
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_BODY, first.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, first.getRequestBody().getResponse().getStatus());
+
+    // The exchange must still be alive to move on to the response direction; a request-phase
+    // end-of-stream must not finalize the exchange.
+    sender.onNext(envoyRequest(ProcessingRequest.RequestCase.RESPONSE_HEADERS, headers, true));
+    ProcessingResponse second = awaitExchangeResponse(10);
+    assertEquals(ProcessingResponse.ResponseCase.RESPONSE_HEADERS, second.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, second.getResponseHeaders().getResponse().getStatus());
+  }
+
   // ------------------------------------------------------------------
   // Test helpers
   // ------------------------------------------------------------------
@@ -415,6 +454,12 @@ class DemoProcessorExchangeTest {
         break;
       case RESPONSE_HEADERS:
         builder2.setResponseHeaders(builder.build());
+        break;
+      case REQUEST_BODY:
+        builder2.setRequestBody(HttpBody.newBuilder().setEndOfStream(endOfStream).build());
+        break;
+      case RESPONSE_BODY:
+        builder2.setResponseBody(HttpBody.newBuilder().setEndOfStream(endOfStream).build());
         break;
       default:
         throw new IllegalArgumentException("unsupported phase for envoy test request: " + phase);

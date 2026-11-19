@@ -295,15 +295,14 @@ public class DemoRequestProcessor implements RequestProcessor {
     if (responsePhase && endOfStream) {
       // The phase signaled end-of-stream during a response phase, which marks the end of the
       // direction the demo retires on. End-of-stream marks the end of a single direction (e.g. the
-      // request headers for a bodyless GET), not the end of the exchange, so retire only for
-      // response phases; otherwise keep the handle in the request context for the next phase.
+      // request headers for a bodyless GET, or the final request body for a POST), not the end of
+      // the exchange, so retire and finalize only when a response phase signaled end-of-stream.
       retireStream(ctx);
       ctx.setProcessingComplete();
-    } else if (!responsePhase && endOfStream) {
-      // A request phase that signaled end-of-stream ends the direction as well (e.g. a bodyless
-      // GET reporting the request headers phase as its final phase).
-      ctx.setProcessingComplete();
     }
+    // NOTE: end-of-stream during a request phase (e.g. the final REQUEST_BODY of a POST, or
+    // REQUEST_HEADERS of a bodyless GET) ends that direction only; the exchange continues with the
+    // response phases, so we must not finalize here.
   }
 
   protected ProcessResponse sendPhaseAndDecide(
@@ -403,8 +402,17 @@ public class DemoRequestProcessor implements RequestProcessor {
   }
 
   protected void applyDecision(RequestContext ctx, RequestCase phase, Continue continueDecision) {
-    if (continueDecision.getRemoveHeadersList().size() > 0) {
-      ctx.removeHeaders(continueDecision.getRemoveHeadersList());
+    // Header mutations are only meaningful for the headers phases; body and trailers phases must
+    // not carry HeaderMutations.
+    if (isHeadersPhase(phase)) {
+      if (continueDecision.getRemoveHeadersList().size() > 0) {
+        ctx.removeHeaders(continueDecision.getRemoveHeadersList());
+      }
+      Map<String, String> continueHeaders = continueDecision.getHeaders();
+      for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
+        ctx.overwriteHeader(entry.getKey(), entry.getValue());
+      }
+      ctx.addHeader(PROCESSED_HEADER, "true");
     }
     if (continueDecision.hasBody()) {
       ctx.replaceBody(continueDecision.getBody().toByteArray());
@@ -416,11 +424,6 @@ public class DemoRequestProcessor implements RequestProcessor {
         ctx.continueAndReplace();
       }
     }
-    Map<String, String> continueHeaders = continueDecision.getHeaders();
-    for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
-      ctx.overwriteHeader(entry.getKey(), entry.getValue());
-    }
-    ctx.addHeader(PROCESSED_HEADER, "true");
   }
 
   /**
