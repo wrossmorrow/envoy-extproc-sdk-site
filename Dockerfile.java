@@ -11,7 +11,7 @@ COPY java/demo-extproc/gradle/ gradle/
 COPY --chmod=0755 java/demo-extproc/gradlew gradlew
 COPY java/demo-extproc/src/ src/
 COPY gen/ gen/
-RUN ./gradlew --no-daemon installDist -PgeneratedCodeDir=/home/demo/gen/java
+RUN ./gradlew --no-daemon installDist -PgeneratedCodeDir=/home/demo/gen/java -Pgpr.user="${GITHUB_ACTOR}" -Pgpr.key="${GITHUB_TOKEN}"
 
 FROM eclipse-temurin:${JAVA_VERSION}-jre
 COPY --from=builder /home/demo/build/install/demo-extproc/ /opt/demo-extproc
