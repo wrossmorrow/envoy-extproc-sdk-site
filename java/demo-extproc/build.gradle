@@ -1,0 +1,89 @@
+plugins {
+  id 'java'
+  id 'application'
+  id 'com.diffplug.spotless' version '6.20.0'
+}
+
+// The demo extproc is built on envoy-extproc-sdk-java. The 0.3.0-alpha1 release is
+// consumed from the GitHub Packages registry (see the maven-github-packages repository
+// below) and from the local Maven repository published via `just java-sdk-install`, because
+// it is not published to Maven Central.
+def sdkVersion = '0.3.0-alpha1'
+
+java {
+  sourceCompatibility = JavaVersion.VERSION_21
+  targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+  mavenCentral()
+  mavenLocal()
+  maven { url 'https://buf.build/gen/maven' }
+  // GitHub Packages mirror of the envoy-extproc-sdk-java releases (requires a token with
+  // package read access; the local Maven repo above covers offline/local publishing).
+  maven {
+    url = uri("https://maven.pkg.github.com/wrossmorrow/envoy-extproc-sdk-java")
+    credentials {
+      username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
+      password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
+    }
+  }
+}
+
+dependencies {
+  // generated controller/v1 gRPC + protobuf code (via buf, see gen/java and docs/buf-java.md)
+  implementation 'io.grpc:grpc-stub:1.57.2'
+  implementation 'io.grpc:grpc-protobuf:1.57.2'
+  implementation 'io.grpc:grpc-netty-shaded:1.57.2'
+  implementation 'com.google.protobuf:protobuf-java:3.24.0'
+
+  compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+
+  // envoy-extproc-sdk-java (uber jar: SDK + envoy ext_proc generated code + runtime deps). The
+  // uber jar bundles an older protobuf, so it must not shadow the protobuf above for generated
+  // controller/v1 code.
+  implementation "com.github.wrossmorrow:extproc:${sdkVersion}"
+
+  // tests
+  testImplementation 'org.junit.jupiter:junit-jupiter:5.9.1'
+  testImplementation 'io.grpc:grpc-testing:1.57.2'
+  testImplementation 'io.grpc:grpc-netty-shaded:1.57.2'
+}
+
+// buf generates the controller/v1 java code into the repo-level gen/java directory
+// (mirroring gen/go and gen/rust); see docs/buf-java.md and the buf.gen.yaml plugins.
+sourceSets {
+  main {
+    java {
+      srcDir 'src/main/java'
+      srcDir project.findProperty('generatedCodeDir') ?: layout.projectDirectory.dir('../../gen/java')
+    }
+  }
+  test {
+    java {
+      srcDir 'src/test/java'
+    }
+  }
+}
+
+application {
+  mainClass = 'com.github.wrossmorrow.extproc.demo.DemoExtProcServer'
+}
+
+spotless {
+  java {
+    target fileTree('.') {
+      include '**/*.java'
+      exclude '**/build/**', '**/build-*/**'
+    }
+    importOrder()
+    removeUnusedImports()
+    trimTrailingWhitespace()
+    endWithNewline()
+    googleJavaFormat()
+  }
+}
+
+tasks.named('test') {
+  useJUnitPlatform()
+}

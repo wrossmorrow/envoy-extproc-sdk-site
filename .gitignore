@@ -33,3 +33,7 @@ go.work.sum
 
 # Build artifacts (binaries named after the Go modules, from `just build`)
 bin/
+
+# Gradle build output and caches (java/demo-extproc)
+build/
+.gradle/

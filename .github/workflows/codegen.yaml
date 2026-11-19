@@ -5,6 +5,7 @@ on:
       - 'proto/**'
       - 'gen/go/**'
       - 'gen/rust/**'
+      - 'gen/java/**'
       - 'buf.gen.yaml'
       - 'buf.yaml'
 jobs:
@@ -19,7 +20,18 @@ jobs:
           go-version-file: 'go.mod'
           cache-dependency-path: 'go.sum'
       - name: Set up rust
-        uses: dtolnay/rust-toolchain@stable   # add
+        uses: dtolnay/rust-toolchain@stable
+      - name: Set up protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: '36.2'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install protoc-gen-grpc-java
+        run: |
+          GRPC_JAVA_VERSION="1.68.1" # Match your build.gradle version
+          curl -sSL "https://repo1.maven.org/maven2/io/grpc/protoc-gen-grpc-java/${GRPC_JAVA_VERSION}/protoc-gen-grpc-java-${GRPC_JAVA_VERSION}-linux-x86_64.exe" \
+            -o /usr/local/bin/protoc-gen-grpc-java
+          chmod +x /usr/local/bin/protoc-gen-grpc-java
       - name: Set up Buf
         uses: bufbuild/buf-action@v1
         with:
@@ -32,7 +44,7 @@ jobs:
           go mod tidy
       - name: Verify clean working directory
         run: |
-          if ! test -z "$(git status --porcelain gen/go gen/rust)"; then
+          if ! test -z "$(git status --porcelain gen/go gen/rust gen/java)"; then
             echo "Error: gen/go is out of sync with proto/ definitions."
             echo "Run 'buf generate' locally and commit the changes."
             exit 1

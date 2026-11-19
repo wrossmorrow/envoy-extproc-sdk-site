@@ -67,12 +67,42 @@ build cmd *flags="": gen
 containerize cmd tag=image_tag *flags="": gen
     docker build --build-arg CMD={{cmd}} -t {{ image_name }}-{{cmd}}:{{ tag }} . {{ flags }}
 
+# build the java demo extproc
+java-build:
+    cd java/demo-extproc && ./gradlew --no-daemon build
+
+# run the java demo extproc unit tests
+java-test:
+    cd java/demo-extproc && ./gradlew --no-daemon test
+
+# run the java demo extproc
+java-run:
+    cd java/demo-extproc && ./gradlew --no-daemon run
+
+# publish the envoy extproc sdk locally (from the envoy-extproc-sdk-java checkout)
+java-sdk-install:
+    cd /tmp/envoy-extproc-sdk-java && ./gradlew publishToMavenLocal -PreleaseVersion=0.3.0-alpha1
+
 # containerize the rust demo extproc
 containerize-rust tag=image_tag:
     docker build -f Dockerfile.rust -t {{ image_name }}-extproc:{{ tag }} .
 
+# containerize the java demo extproc
+containerize-java tag=image_tag:
+    #!/bin/bash
+    export GITHUB_ACTOR="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.user=([^ ]+)[ ]*$/\1/p' )"
+    export GITHUB_TOKEN="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.key=([^ ]+)[ ]*$/\1/p' )"
+    docker build \
+        --build-arg GITHUB_ACTOR="${GITHUB_ACTOR}" \
+        --secret id=github_token,env=GITHUB_TOKEN \
+        -f Dockerfile.java \
+        -t {{ image_name }}-extproc-java:{{ tag }} .
+
 # bring up compose
-up *flags="": gen
+up *flags="":
+    #!/bin/bash
+    export GITHUB_ACTOR="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.user=([^ ]+)[ ]*$/\1/p' )"
+    export GITHUB_TOKEN="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.key=([^ ]+)[ ]*$/\1/p' )"
     docker compose up --build {{flags}}
 
 # bring down compose
