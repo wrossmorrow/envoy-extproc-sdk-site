@@ -20,6 +20,12 @@ jobs:
           cache-dependency-path: 'go.sum'
       - name: Set up rust
         uses: dtolnay/rust-toolchain@stable   # add
+      - name: Install protoc-gen-grpc-java
+        run: |
+          GRPC_JAVA_VERSION="1.68.1" # Match your build.gradle version
+          curl -sSL "https://repo1.maven.org/maven2/io/grpc/protoc-gen-grpc-java/${GRPC_JAVA_VERSION}/protoc-gen-grpc-java-${GRPC_JAVA_VERSION}-linux-x86_64.exe" \
+            -o /usr/local/bin/protoc-gen-grpc-java
+          chmod +x /usr/local/bin/protoc-gen-grpc-java
       - name: Set up Buf
         uses: bufbuild/buf-action@v1
         with:
