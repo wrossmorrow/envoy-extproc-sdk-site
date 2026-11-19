@@ -1,13 +1,19 @@
 package com.github.wrossmorrow.extproc.demo;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import build.buf.gen.envoy.service.ext_proc.v3.CommonResponse.ResponseStatus;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingRequest.RequestCase;
+import build.buf.gen.envoy.service.ext_proc.v3.ProcessingResponse;
+import com.controller.v1.Continue;
 import com.controller.v1.HttpSnapshot;
 import com.controller.v1.Phase;
 import com.github.wrossmorrow.extproc.RequestContext;
+import com.google.protobuf.ByteString;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,6 +129,34 @@ class DemoRequestProcessorTest {
   void maskedLeavesNonSensitiveHeadersUntouched() {
     assertEquals("value", PROCESSOR.masked("x-normal", "value"));
     assertEquals("value", PROCESSOR.masked(null, "value"));
+  }
+
+  @Test
+  void continueDecisionWithBodyYieldsContinueAndReplaceWithBodyMutation() {
+    RequestContext ctx = new RequestContext();
+    PROCESSOR.applyDecision(
+        ctx, Continue.newBuilder().setBody(ByteString.copyFromUtf8("rewritten-body")).build());
+
+    ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_HEADERS);
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
+    assertEquals(
+        ResponseStatus.CONTINUE_AND_REPLACE,
+        response.getRequestHeaders().getResponse().getStatus());
+    assertTrue(response.getRequestHeaders().getResponse().hasBodyMutation());
+    assertArrayEquals(
+        "rewritten-body".getBytes(StandardCharsets.UTF_8),
+        response.getRequestHeaders().getResponse().getBodyMutation().getBody().toByteArray());
+  }
+
+  @Test
+  void continueDecisionWithoutBodyYieldsPlainContinueWithoutBodyMutation() {
+    RequestContext ctx = new RequestContext();
+    PROCESSOR.applyDecision(ctx, Continue.newBuilder().build());
+
+    ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_HEADERS);
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
+    assertEquals(0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
   }
 
   private static Map<String, String> sortedHeaders() {
