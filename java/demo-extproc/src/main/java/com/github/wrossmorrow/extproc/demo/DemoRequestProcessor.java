@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
 
 /**
@@ -359,8 +358,6 @@ public class DemoRequestProcessor implements RequestProcessor {
       return (ProcessResponse) next;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new RuntimeException("timed out waiting for controller decision", e);
-    } catch (TimeoutException e) {
       throw new RuntimeException("timed out waiting for controller decision", e);
     }
   }
