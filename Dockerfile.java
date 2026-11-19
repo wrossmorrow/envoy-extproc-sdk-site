@@ -9,7 +9,7 @@ COPY java/demo-extproc/gradle/ java/demo-extproc/gradle/
 COPY java/demo-extproc/gradlew java/demo-extproc/gradlew
 COPY java/demo-extproc/src/ java/demo-extproc/src/
 COPY gen/java/ gen/java/
-RUN ./gradlew --no-daemon installDist
+RUN chmod +x ./gradlew && ./gradlew --no-daemon installDist
 
 FROM eclipse-temurin:${JAVA_VERSION}-jre
 COPY --from=builder /home/demo-extproc-build/java/demo-extproc/build/install/demo-extproc/ /opt/demo-extproc
