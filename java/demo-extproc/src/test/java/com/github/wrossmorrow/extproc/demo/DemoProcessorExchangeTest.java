@@ -16,8 +16,8 @@ import build.buf.gen.envoy.service.ext_proc.v3.ImmediateResponse;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingRequest;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingResponse;
 import com.controller.v1.Phase;
-import com.google.protobuf.ByteString;
 import com.github.wrossmorrow.extproc.ExternalProcessorServer;
+import com.google.protobuf.ByteString;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
@@ -219,8 +219,7 @@ class DemoProcessorExchangeTest {
 
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
-    assertEquals(
-        0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
+    assertEquals(0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
   }
 
   @Test

@@ -156,8 +156,7 @@ class DemoRequestProcessorTest {
     ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_HEADERS);
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
-    assertEquals(
-        0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
+    assertEquals(0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
   }
 
   private static Map<String, String> sortedHeaders() {
