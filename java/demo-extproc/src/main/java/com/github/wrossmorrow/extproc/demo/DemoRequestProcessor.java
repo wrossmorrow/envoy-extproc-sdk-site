@@ -378,9 +378,9 @@ public class DemoRequestProcessor implements RequestProcessor {
     MethodDescriptor<ProcessRequest, ProcessResponse> method =
         DemoProcessorServiceGrpc.getProcessMethod();
     ManagedChannel channel = controllerChannel();
-    ClientCall<ProcessRequest, ProcessResponse> call =
-        channel.newCall(
-            method, CallOptions.withDeadlineAfter(exchangeTimeoutSeconds, TimeUnit.SECONDS));
+    CallOptions callOptions =
+        CallOptions.DEFAULT.withDeadlineAfter(exchangeTimeoutSeconds, TimeUnit.SECONDS);
+    ClientCall<ProcessRequest, ProcessResponse> call = channel.newCall(method, callOptions);
     StreamObserver<ProcessRequest> sender =
         ClientCalls.asyncBidiStreamingCall(call, responseObserver);
     ctx.setValue(CONTROLLER_STREAM_KEY, sender);
