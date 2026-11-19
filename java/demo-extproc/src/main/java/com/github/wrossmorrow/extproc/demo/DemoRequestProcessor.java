@@ -1,5 +1,6 @@
 package com.github.wrossmorrow.extproc.demo;
 
+import build.buf.gen.envoy.service.ext_proc.v3.CommonResponse.ResponseStatus;
 import build.buf.gen.envoy.service.ext_proc.v3.ProcessingRequest.RequestCase;
 import com.controller.v1.Cancel;
 import com.controller.v1.Continue;
@@ -274,6 +275,9 @@ public class DemoRequestProcessor implements RequestProcessor {
     boolean endOfStream = ctx.streamComplete() != null && ctx.streamComplete();
     boolean responsePhase = isResponsePhase(phase);
     Decision action = decision != null ? decision.getDecision() : null;
+    if (action != null) {
+      logPhaseDecisionReceived(phase, action);
+    }
     if (action != null && action.getActionCase() == Decision.ActionCase.CANCEL) {
       // A cancel ends the exchange, so retire the controller phase stream before surfacing the
       // cancellation to the phase context.
@@ -284,7 +288,9 @@ public class DemoRequestProcessor implements RequestProcessor {
       return;
     }
     if (action != null && action.getActionCase() == Decision.ActionCase.CONTINUE) {
-      applyDecision(ctx, action.getContinue());
+      Continue continueDecision = action.getContinue();
+      applyDecision(ctx, continueDecision);
+      logPhaseDecisionSent(phase, continueDecision);
     }
     if (responsePhase && endOfStream) {
       // The phase signaled end-of-stream during a response phase, which marks the end of the
@@ -394,6 +400,67 @@ public class DemoRequestProcessor implements RequestProcessor {
       ctx.overwriteHeader(entry.getKey(), entry.getValue());
     }
     ctx.addHeader(PROCESSED_HEADER, "true");
+  }
+
+  /**
+   * Logs a phase decision received from the controller for the phase being resolved, including
+   * the body mutation and header changes the decision carries.
+   */
+  protected void logPhaseDecisionReceived(RequestCase phase, Decision action) {
+    String phaseName = phaseName(phase);
+    switch (action.getActionCase()) {
+      case CANCEL:
+        Cancel cancel = action.getCancel();
+        logger.info(
+            "Demo processor phase decision received: phase="
+                + phaseName
+                + " action=CANCEL status="
+                + cancel.getStatus()
+                + " body="
+                + cancel.getBody()
+                + " headers="
+                + cancel.getHeaders());
+        break;
+      case CONTINUE:
+        Continue continueDecision = action.getContinue();
+        logger.info(
+            "Demo processor phase decision received: phase="
+                + phaseName
+                + " action=CONTINUE removeHeaders="
+                + continueDecision.getRemoveHeadersList()
+                + " bodyBytes="
+                + (continueDecision.hasBody() ? continueDecision.getBody().size() : 0)
+                + " headers="
+                + continueDecision.getHeaders());
+        break;
+      default:
+        logger.info(
+            "Demo processor phase decision received: phase="
+                + phaseName
+                + " action="
+                + action.getActionCase());
+    }
+  }
+
+  /**
+   * Logs the phase decision sent to envoy for the phase being resolved, derived from the
+   * controller's continue decision (which drives the envoy phase response mutation).
+   */
+  protected void logPhaseDecisionSent(RequestCase phase, Continue continueDecision) {
+    String phaseName = phaseName(phase);
+    ResponseStatus envoyStatus =
+        continueDecision.hasBody()
+            ? ResponseStatus.CONTINUE_AND_REPLACE
+            : ResponseStatus.CONTINUE;
+    logger.info(
+        "Demo processor phase decision sent to envoy: phase="
+            + phaseName
+            + " action=CONTINUE status="
+            + envoyStatus
+            + " hasBody="
+            + continueDecision.hasBody()
+            + " bodyBytes="
+            + (continueDecision.hasBody() ? continueDecision.getBody().size() : 0));
   }
 
   protected void retireStream(RequestContext ctx) {
