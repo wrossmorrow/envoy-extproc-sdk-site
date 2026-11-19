@@ -79,6 +79,10 @@ java-test:
 java-run:
     cd java/demo-extproc && ./gradlew --no-daemon run
 
+# publish the envoy extproc sdk locally (from the envoy-extproc-sdk-java checkout)
+java-sdk-install:
+    cd /tmp/envoy-extproc-sdk-java && ./gradlew publishToMavenLocal -PreleaseVersion=0.3.0-alpha1
+
 # containerize the rust demo extproc
 containerize-rust tag=image_tag:
     docker build -f Dockerfile.rust -t {{ image_name }}-extproc:{{ tag }} .
