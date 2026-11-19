@@ -31,8 +31,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
@@ -65,9 +64,10 @@ public class DemoRequestProcessor implements RequestProcessor {
   // RequestContext custom data keys (the context persists across phases of an exchange).
   static final String CONTROLLER_STREAM_KEY = "controllerDemoStream";
   static final String CONTROLLER_RESPONSE_KEY = "controllerDemoResponseObserver";
-  static final String CONTROLLER_DECISION_KEY = "controllerDemoDecision";
+  static final String CONTROLLER_DECISIONS_KEY = "controllerDemoDecisions";
   static final String CONTROLLER_SESSION_ID_KEY = "controllerDemoSessionID";
   static final String SNAPSHOT_NAMES_KEY = "controllerDemoSnapshotHeaderNames";
+  static final String CONTROLLER_CALL_KEY = "controllerDemoCall";
 
   private static final Logger logger = Logger.getLogger(DemoRequestProcessor.class.getName());
 
@@ -308,12 +308,12 @@ public class DemoRequestProcessor implements RequestProcessor {
 
   protected ProcessResponse sendPhaseAndDecide(
       RequestContext ctx, RequestCase phase, String sessionID, HttpSnapshot snapshot) {
-    CompletableFuture<ProcessResponse> decisionFuture =
-        (CompletableFuture<ProcessResponse>) ctx.getValue(CONTROLLER_DECISION_KEY);
-    final CompletableFuture<ProcessResponse> decision =
-        decisionFuture == null ? new CompletableFuture<>() : decisionFuture;
-    if (decisionFuture == null) {
-      ctx.setValue(CONTROLLER_DECISION_KEY, decision);
+    LinkedBlockingQueue<Object> decisions =
+        (LinkedBlockingQueue<Object>) ctx.getValue(CONTROLLER_DECISIONS_KEY);
+    final LinkedBlockingQueue<Object> phaseDecisions =
+        decisions != null ? decisions : new LinkedBlockingQueue<>();
+    if (decisions == null) {
+      ctx.setValue(CONTROLLER_DECISIONS_KEY, phaseDecisions);
     }
     StreamObserver<ProcessResponse> responseObserver =
         (StreamObserver<ProcessResponse>) ctx.getValue(CONTROLLER_RESPONSE_KEY);
@@ -322,17 +322,17 @@ public class DemoRequestProcessor implements RequestProcessor {
           new StreamObserver<ProcessResponse>() {
             @Override
             public void onNext(ProcessResponse value) {
-              decision.complete(value);
+              phaseDecisions.offer(value);
             }
 
             @Override
             public void onError(Throwable t) {
-              decision.completeExceptionally(t);
+              phaseDecisions.offer(t);
             }
 
             @Override
             public void onCompleted() {
-              decision.completeExceptionally(
+              phaseDecisions.offer(
                   new IllegalStateException("controller closed phase stream without a decision"));
             }
           };
@@ -346,21 +346,22 @@ public class DemoRequestProcessor implements RequestProcessor {
             .setSnapshot(snapshot)
             .build());
     try {
-      return decision.get(exchangeTimeoutSeconds, TimeUnit.SECONDS);
+      Object next = phaseDecisions.poll(exchangeTimeoutSeconds, TimeUnit.SECONDS);
+      if (next == null) {
+        throw new RuntimeException("timed out waiting for controller decision");
+      }
+      if (next instanceof RuntimeException e) {
+        throw e;
+      }
+      if (next instanceof Throwable t) {
+        throw new RuntimeException("controller phase exchange failed", t);
+      }
+      return (ProcessResponse) next;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new RuntimeException("timed out waiting for controller decision", e);
     } catch (TimeoutException e) {
       throw new RuntimeException("timed out waiting for controller decision", e);
-    } catch (ExecutionException e) {
-      Throwable cause = e.getCause();
-      if (cause instanceof RuntimeException) {
-        throw (RuntimeException) cause;
-      }
-      if (cause instanceof Error) {
-        throw (Error) cause;
-      }
-      throw new RuntimeException("controller phase exchange failed", cause);
     }
   }
 
@@ -377,11 +378,14 @@ public class DemoRequestProcessor implements RequestProcessor {
     MethodDescriptor<ProcessRequest, ProcessResponse> method =
         DemoProcessorServiceGrpc.getProcessMethod();
     ManagedChannel channel = controllerChannel();
-    ClientCall<ProcessRequest, ProcessResponse> call = channel.newCall(method, CallOptions.DEFAULT);
+    ClientCall<ProcessRequest, ProcessResponse> call =
+        channel.newCall(
+            method, CallOptions.withDeadlineAfter(exchangeTimeoutSeconds, TimeUnit.SECONDS));
     StreamObserver<ProcessRequest> sender =
         ClientCalls.asyncBidiStreamingCall(call, responseObserver);
     ctx.setValue(CONTROLLER_STREAM_KEY, sender);
     ctx.setValue(CONTROLLER_RESPONSE_KEY, responseObserver);
+    ctx.setValue(CONTROLLER_CALL_KEY, call);
     return sender;
   }
 
@@ -474,6 +478,20 @@ public class DemoRequestProcessor implements RequestProcessor {
       }
     }
     ctx.setValue(CONTROLLER_STREAM_KEY, null);
+    ctx.setValue(CONTROLLER_RESPONSE_KEY, null);
+    ctx.setValue(CONTROLLER_DECISIONS_KEY, null);
+    ClientCall<ProcessRequest, ProcessResponse> call =
+        (ClientCall<ProcessRequest, ProcessResponse>) ctx.getValue(CONTROLLER_CALL_KEY);
+    if (call != null) {
+      try {
+        call.cancel(
+            "controller phase stream retired",
+            new RuntimeException("controller phase stream retired"));
+      } catch (Exception e) {
+        // best effort cancel of the controller phase call
+      }
+    }
+    ctx.setValue(CONTROLLER_CALL_KEY, null);
   }
 
   // ------------------------------------------------------------------

@@ -384,6 +384,62 @@ class DemoProcessorExchangeTest {
     assertEquals(ResponseStatus.CONTINUE, second.getResponseHeaders().getResponse().getStatus());
   }
 
+  @Test
+  void demoWaitsForPerPhaseDecisionsOnSharedControllerStream() throws Exception {
+    Map<String, String> headers = new HashMap<>();
+    headers.put("x-demo-session-id", "sess-7");
+    headers.put(":method", "GET");
+    headers.put(":path", "/health");
+
+    // Phase 1: the human continues the request headers phase having set a marker header.
+    forcedDecision =
+        com.controller.v1.Decision.newBuilder()
+            .setContinue(
+                com.controller.v1.Continue.newBuilder()
+                    .setHeaders(Map.of("x-demo-phase-marker", "headers"))
+                    .build())
+            .build();
+    StreamObserver<ProcessingResponse> responseObserver =
+        new StreamObserver<ProcessingResponse>() {
+          @Override
+          public void onNext(ProcessingResponse value) {
+            exchangeResponse.add(value);
+          }
+
+          @Override
+          public void onError(Throwable t) {
+            exchangeError.set(t);
+          }
+
+          @Override
+          public void onCompleted() {
+            // the exchange is finalized by the decision that was applied
+          }
+        };
+    StreamObserver<ProcessingRequest> sender = extProcStub.process(responseObserver);
+    sender.onNext(envoyRequest(ProcessingRequest.RequestCase.REQUEST_HEADERS, headers, false));
+    ProcessingResponse first = awaitExchangeResponse(10);
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, first.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, first.getRequestHeaders().getResponse().getStatus());
+    assertTrue(
+        hasHeader(
+            first.getRequestHeaders().getResponse().getHeaderMutation(), "x-demo-phase-marker"));
+
+    // Phase 2: the human continues the response headers phase without changes. The phase must
+    // resolve on its own decision rather than reusing the phase 1 decision.
+    forcedDecision =
+        com.controller.v1.Decision.newBuilder()
+            .setContinue(com.controller.v1.Continue.newBuilder().build())
+            .build();
+    sender.onNext(envoyRequest(ProcessingRequest.RequestCase.RESPONSE_HEADERS, headers, true));
+    ProcessingResponse second = awaitExchangeResponse(10);
+    assertEquals(ProcessingResponse.ResponseCase.RESPONSE_HEADERS, second.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, second.getResponseHeaders().getResponse().getStatus());
+    assertFalse(
+        hasHeader(
+            second.getResponseHeaders().getResponse().getHeaderMutation(), "x-demo-phase-marker"));
+  }
+
   // ------------------------------------------------------------------
   // Test helpers
   // ------------------------------------------------------------------
@@ -448,6 +504,19 @@ class DemoProcessorExchangeTest {
       HeaderValueOption option = mutation.getSetHeaders(i);
       if ("x-demo-processed".equals(option.getHeader().getKey())) {
         return "true".equals(option.getHeader().getValue());
+      }
+    }
+    return false;
+  }
+
+  private static boolean hasHeader(HeaderMutation mutation, String key) {
+    if (mutation == null || mutation.getSetHeadersList().isEmpty()) {
+      return false;
+    }
+    for (int i = 0; i < mutation.getSetHeadersCount(); i++) {
+      HeaderValueOption option = mutation.getSetHeaders(i);
+      if (key.equals(option.getHeader().getKey())) {
+        return true;
       }
     }
     return false;
