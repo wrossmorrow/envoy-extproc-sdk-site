@@ -5,6 +5,7 @@ on:
       - 'proto/**'
       - 'gen/go/**'
       - 'gen/rust/**'
+      - 'gen/java/**'
       - 'buf.gen.yaml'
       - 'buf.yaml'
 jobs:
@@ -38,7 +39,7 @@ jobs:
           go mod tidy
       - name: Verify clean working directory
         run: |
-          if ! test -z "$(git status --porcelain gen/go gen/rust)"; then
+          if ! test -z "$(git status --porcelain gen/go gen/rust gen/java)"; then
             echo "Error: gen/go is out of sync with proto/ definitions."
             echo "Run 'buf generate' locally and commit the changes."
             exit 1
