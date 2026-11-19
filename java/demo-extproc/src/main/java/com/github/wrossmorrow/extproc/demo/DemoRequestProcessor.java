@@ -394,6 +394,10 @@ public class DemoRequestProcessor implements RequestProcessor {
       // Envoy only applies body mutations on a CONTINUE_AND_REPLACE decision; a plain CONTINUE
       // leaves the phase response without replace semantics while still carrying the mutation.
       ctx.continueAndReplace();
+    } else {
+      // A continue without a body must not leave a staged body mutation behind; clear it so envoy
+      // does not validate a body mutation against a content length that no longer matches.
+      ctx.clearBody();
     }
     Map<String, String> continueHeaders = continueDecision.getHeaders();
     for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
