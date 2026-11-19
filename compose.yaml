@@ -111,7 +111,7 @@ services:
 
 secrets:
   github_token:
-    env: GITHUB_TOKEN
+    file: ./github_token
 
 networks:
   demo: {}
