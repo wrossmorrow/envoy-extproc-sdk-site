@@ -5,12 +5,16 @@ managed:
     - file_option: go_package_prefix
       value: github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go
 plugins:
-  - local: ["go", "tool", "protoc-gen-go"]
+  # Buf remote plugins: buf fetches and runs these from the Buf Schema Registry, so the Go
+  # codegen path needs no locally installed protoc-gen-* binaries.
+  - remote: buf.build/protocolbuffers/go:v1.36.12
     out: gen/go
     opt: paths=source_relative
-  - local: ["go", "tool", "protoc-gen-go-grpc"]
+  - remote: buf.build/grpc/go:v1.6.2
     out: gen/go
     opt: paths=source_relative
+  # Buf hosts a connect plugin, but only the v2 line (it emits connectrpc.com/connect/v2); the
+  # demo speaks connect v1, so this entry stays a local plugin for now.
   - local: ["go", "tool", "protoc-gen-connect-go"]
     out: gen/go
     opt: paths=source_relative

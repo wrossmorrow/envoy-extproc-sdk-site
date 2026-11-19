@@ -12,7 +12,10 @@ The demo keeps a single source of truth for its API definitions: the `proto/`
 module (`controller.v1`). Two code paths exist today:
 
 - **Go:** `buf generate` (via `buf.gen.yaml`, managed mode, Go plugins →
-  `gen/go`) is the codegen entry point. `just gen` runs `buf generate`.
+  `gen/go`) is the codegen entry point. `just gen` runs `buf generate`. The Go
+  plugins run as Buf remote plugins (`buf.build/protocolbuffers/go` and
+  `buf.build/grpc/go`) hosted on the Buf Schema Registry, so no local
+  protoc-gen-* installs are needed for the Go codegen path.
 - **Rust (implemented):** `buf generate` invokes a local `protoc-gen-tonic-prost` plugin
   (`buf.gen.yaml`: `local: ["protoc-gen-tonic-prost"]`, `out: gen/rust`) that emits
   `gen/rust/controller.v1.rs` from the same `proto/` module. The crate includes that file via
