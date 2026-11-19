@@ -2,7 +2,7 @@ ARG JAVA_VERSION=21
 ARG GRPC_HEALTH_PROBE_VERSION=v0.4.39
 FROM eclipse-temurin:${JAVA_VERSION}-jdk AS builder
 
-WORKDIR /home/demo-extproc-build
+WORKDIR /home/demo-extproc-build/java/demo-extproc
 COPY java/demo-extproc/build.gradle java/demo-extproc/build.gradle
 COPY java/demo-extproc/settings.gradle java/demo-extproc/settings.gradle
 COPY java/demo-extproc/gradle/ java/demo-extproc/gradle/
