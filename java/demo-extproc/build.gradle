@@ -56,7 +56,7 @@ sourceSets {
   main {
     java {
       srcDir 'src/main/java'
-      srcDir layout.projectDirectory.dir('../../gen/java')
+      srcDir project.findProperty('generatedCodeDir') ?: layout.projectDirectory.dir('../../gen/java')
     }
   }
   test {
