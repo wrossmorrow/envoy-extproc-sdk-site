@@ -135,7 +135,9 @@ class DemoRequestProcessorTest {
   void continueDecisionWithBodyYieldsContinueAndReplaceWithBodyMutation() {
     RequestContext ctx = new RequestContext();
     PROCESSOR.applyDecision(
-        ctx, Continue.newBuilder().setBody(ByteString.copyFromUtf8("rewritten-body")).build());
+        ctx,
+        RequestCase.REQUEST_HEADERS,
+        Continue.newBuilder().setBody(ByteString.copyFromUtf8("rewritten-body")).build());
 
     ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_HEADERS);
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
@@ -151,7 +153,7 @@ class DemoRequestProcessorTest {
   @Test
   void continueDecisionWithoutBodyYieldsPlainContinueWithoutBodyMutation() {
     RequestContext ctx = new RequestContext();
-    PROCESSOR.applyDecision(ctx, Continue.newBuilder().build());
+    PROCESSOR.applyDecision(ctx, RequestCase.REQUEST_HEADERS, Continue.newBuilder().build());
 
     ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_HEADERS);
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
@@ -159,6 +161,34 @@ class DemoRequestProcessorTest {
     assertFalse(response.getRequestHeaders().getResponse().getBodyMutation().getClearBody());
     assertFalse(response.getRequestHeaders().getResponse().getBodyMutation().hasBody());
     assertEquals(0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
+  }
+
+  @Test
+  void continueDecisionWithBodyInBodyPhaseYieldsPlainContinueWithoutReplace() {
+    RequestContext ctx = new RequestContext();
+    PROCESSOR.applyDecision(
+        ctx,
+        RequestCase.REQUEST_BODY,
+        Continue.newBuilder().setBody(ByteString.copyFromUtf8("rewritten-body")).build());
+
+    ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_BODY);
+    assertEquals(ProcessingResponse.ResponseCase.REQUEST_BODY, response.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, response.getRequestBody().getResponse().getStatus());
+    assertTrue(response.getRequestBody().getResponse().hasBodyMutation());
+    assertArrayEquals(
+        "rewritten-body".getBytes(StandardCharsets.UTF_8),
+        response.getRequestBody().getResponse().getBodyMutation().getBody().toByteArray());
+  }
+
+  @Test
+  void headersPhaseDetectionCoversRequestAndResponseHeadersOnly() {
+    assertTrue(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_HEADERS));
+    assertTrue(PROCESSOR.isHeadersPhase(RequestCase.RESPONSE_HEADERS));
+    assertFalse(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_BODY));
+    assertFalse(PROCESSOR.isHeadersPhase(RequestCase.RESPONSE_BODY));
+    assertFalse(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_TRAILERS));
+    assertFalse(PROCESSOR.isHeadersPhase(RequestCase.RESPONSE_TRAILERS));
+    assertFalse(PROCESSOR.isHeadersPhase(RequestCase.REQUEST_NOT_SET));
   }
 
   private static Map<String, String> sortedHeaders() {

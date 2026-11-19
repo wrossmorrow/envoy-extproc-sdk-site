@@ -289,7 +289,7 @@ public class DemoRequestProcessor implements RequestProcessor {
     }
     if (action != null && action.getActionCase() == Decision.ActionCase.CONTINUE) {
       Continue continueDecision = action.getContinue();
-      applyDecision(ctx, continueDecision);
+      applyDecision(ctx, phase, continueDecision);
       logPhaseDecisionSent(phase, continueDecision);
     }
     if (responsePhase && endOfStream) {
@@ -402,15 +402,19 @@ public class DemoRequestProcessor implements RequestProcessor {
     return sender;
   }
 
-  protected void applyDecision(RequestContext ctx, Continue continueDecision) {
+  protected void applyDecision(RequestContext ctx, RequestCase phase, Continue continueDecision) {
     if (continueDecision.getRemoveHeadersList().size() > 0) {
       ctx.removeHeaders(continueDecision.getRemoveHeadersList());
     }
     if (continueDecision.hasBody()) {
       ctx.replaceBody(continueDecision.getBody().toByteArray());
-      // Envoy only applies body mutations on a CONTINUE_AND_REPLACE decision; a plain CONTINUE
-      // leaves the phase response without replace semantics while still carrying the mutation.
-      ctx.continueAndReplace();
+      // Envoy applies body mutations on a CONTINUE_AND_REPLACE decision. CONTINUE_AND_REPLACE is
+      // only valid for the headers phases (where envoy may replace or add a body before it has
+      // buffered one); for body phases the mutation rides on a plain CONTINUE, so only upgrade to
+      // CONTINUE_AND_REPLACE outside of body phases.
+      if (isHeadersPhase(phase)) {
+        ctx.continueAndReplace();
+      }
     }
     Map<String, String> continueHeaders = continueDecision.getHeaders();
     for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
@@ -466,7 +470,9 @@ public class DemoRequestProcessor implements RequestProcessor {
   protected void logPhaseDecisionSent(RequestCase phase, Continue continueDecision) {
     String phaseName = phaseName(phase);
     ResponseStatus envoyStatus =
-        continueDecision.hasBody() ? ResponseStatus.CONTINUE_AND_REPLACE : ResponseStatus.CONTINUE;
+        continueDecision.hasBody() && isHeadersPhase(phase)
+            ? ResponseStatus.CONTINUE_AND_REPLACE
+            : ResponseStatus.CONTINUE;
     logger.info(
         "Demo processor phase decision sent to envoy: phase="
             + phaseName
@@ -581,6 +587,16 @@ public class DemoRequestProcessor implements RequestProcessor {
       }
     }
     return false;
+  }
+
+  protected boolean isHeadersPhase(RequestCase phase) {
+    switch (phase) {
+      case REQUEST_HEADERS:
+      case RESPONSE_HEADERS:
+        return true;
+      default:
+        return false;
+    }
   }
 
   protected boolean isResponsePhase(RequestCase phase) {
