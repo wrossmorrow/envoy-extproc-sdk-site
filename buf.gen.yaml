@@ -16,3 +16,12 @@ plugins:
     opt: paths=source_relative
   - local: ["protoc-gen-tonic-prost"]
     out: gen/rust
+  # envoy ext_proc controller service -> java gRPC client/server code
+  - local: ["protoc-gen-grpc-java"]
+    out: gen/java
+  # envoy ext_proc controller messages -> java protobuf messages. The envoy ext_proc SDK (and the
+  # envoy gencode it ships) are built against protobuf 3.x, so the Java generator must run with a
+  # protobuf 3.x protoc binary (e.g. 3.21.x); protoc_path points at the protoc binary on PATH.
+  - protoc_builtin: java
+    out: gen/java
+    protoc_path: protoc

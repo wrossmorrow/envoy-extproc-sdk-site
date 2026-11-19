@@ -67,6 +67,18 @@ build cmd *flags="": gen
 containerize cmd tag=image_tag *flags="": gen
     docker build --build-arg CMD={{cmd}} -t {{ image_name }}-{{cmd}}:{{ tag }} . {{ flags }}
 
+# build the java demo extproc
+java-build:
+    cd java/demo-extproc && ./gradlew --no-daemon build
+
+# run the java demo extproc unit tests
+java-test:
+    cd java/demo-extproc && ./gradlew --no-daemon test
+
+# run the java demo extproc
+java-run:
+    cd java/demo-extproc && ./gradlew --no-daemon run
+
 # containerize the rust demo extproc
 containerize-rust tag=image_tag:
     docker build -f Dockerfile.rust -t {{ image_name }}-extproc:{{ tag }} .
