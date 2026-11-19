@@ -5,7 +5,8 @@ plugins {
 }
 
 // The demo extproc is built on envoy-extproc-sdk-java. The 0.3.0-alpha1 release is
-// consumed from the local Maven repository (see the justfile: java-sdk-install), because
+// consumed from the GitHub Packages registry (see the maven-github-packages repository
+// below) and from the local Maven repository published via `just java-sdk-install`, because
 // it is not published to Maven Central.
 def sdkVersion = '0.3.0-alpha1'
 
@@ -18,6 +19,15 @@ repositories {
   mavenCentral()
   mavenLocal()
   maven { url 'https://buf.build/gen/maven' }
+  // GitHub Packages mirror of the envoy-extproc-sdk-java releases (requires a token with
+  // package read access; the local Maven repo above covers offline/local publishing).
+  maven {
+    url = uri("https://maven.pkg.github.com/wrossmorrow/envoy-extproc-sdk-java")
+    credentials {
+      username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
+      password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
+    }
+  }
 }
 
 dependencies {
