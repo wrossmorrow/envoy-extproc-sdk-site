@@ -219,6 +219,8 @@ class DemoProcessorExchangeTest {
 
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_HEADERS, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getRequestHeaders().getResponse().getStatus());
+    assertFalse(response.getRequestHeaders().getResponse().getBodyMutation().getClearBody());
+    assertFalse(response.getRequestHeaders().getResponse().getBodyMutation().hasBody());
     assertEquals(0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
   }
 
