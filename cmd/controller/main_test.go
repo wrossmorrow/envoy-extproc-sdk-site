@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -14,51 +12,51 @@ import (
 	controller "github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
 )
 
-// TestHandlerServesStaticFrontend asserts that the demo web frontend assets are
-// served by the controller HTTP handler, and that unknown paths are not served.
-func TestHandlerServesStaticFrontend(t *testing.T) {
-	mux, _ := newMux(controller.NewSessionController())
+// TestHandlerAnswersCorsPreflight asserts that the controller answers CORS
+// preflights (OPTIONS) for the browser-facing controller and envoy-bound demo
+// endpoints, and that unknown paths are not served now that the static frontend
+// lives in the standalone web asset server.
+func TestHandlerAnswersCorsPreflight(t *testing.T) {
+	mux, controllerPath := newMux(controller.NewSessionController())
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	cases := []struct {
-		path       string
-		wantStatus int
-		wantCT     string
-		wantBody   string
-	}{
-		{path: "/", wantStatus: http.StatusOK, wantCT: "text/html", wantBody: "<!DOCTYPE html>"},
-		{path: "/app.js", wantStatus: http.StatusOK, wantCT: "text/javascript", wantBody: "connect"},
-		{path: "/style.css", wantStatus: http.StatusOK, wantCT: "text/css", wantBody: "background"},
-		{path: "/missing-asset.txt", wantStatus: http.StatusNotFound, wantCT: "", wantBody: ""},
+	preflights := []string{
+		controllerPath,
+		"/envoy/",
 	}
-	for _, tc := range cases {
-		t.Run(tc.path, func(t *testing.T) {
-			resp, err := http.Get(srv.URL + tc.path)
+	for _, target := range preflights {
+		t.Run("OPTIONS "+target, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodOptions, srv.URL+target, nil)
 			if err != nil {
-				t.Fatalf("GET %s: %v", tc.path, err)
+				t.Fatalf("new OPTIONS request %s: %v", target, err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("OPTIONS %s: %v", target, err)
 			}
 			defer resp.Body.Close()
-			if resp.StatusCode != tc.wantStatus {
-				t.Fatalf("GET %s status = %d, want %d", tc.path, resp.StatusCode, tc.wantStatus)
+			if resp.StatusCode != http.StatusNoContent {
+				t.Fatalf("OPTIONS %s status = %d, want %d", target, resp.StatusCode, http.StatusNoContent)
 			}
-			gotCT := resp.Header.Get("Content-Type")
-			if !strings.HasPrefix(gotCT, tc.wantCT) {
-				t.Fatalf("GET %s Content-Type = %q, want prefix %q", tc.path, gotCT, tc.wantCT)
-			}
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				t.Fatalf("GET %s body read: %v", tc.path, err)
-			}
-			if !strings.Contains(string(body), tc.wantBody) {
-				t.Fatalf("GET %s body = %q, want it to contain %q", tc.path, string(body), tc.wantBody)
+			if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+				t.Fatalf("OPTIONS %s Access-Control-Allow-Origin = %q, want %q", target, got, "*")
 			}
 		})
+	}
+
+	resp, err := http.Get(srv.URL + "/missing-asset.txt")
+	if err != nil {
+		t.Fatalf("GET /missing-asset.txt: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /missing-asset.txt status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 	}
 }
 
 // TestHandlerMountsControllerConnect asserts that the human-facing Connect API is
-// mounted on the same handler as the static frontend and answers a CreateSession
+// mounted on the controller HTTP handler and answers a CreateSession
 // server-streaming call.
 func TestHandlerMountsControllerConnect(t *testing.T) {
 	mux, _ := newMux(controller.NewSessionController())

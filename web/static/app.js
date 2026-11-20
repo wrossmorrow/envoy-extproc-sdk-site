@@ -16,7 +16,7 @@
 const CONNECT_STREAM_CONTENT_TYPE = "application/connect+json";
 const CONNECT_UNARY_CONTENT_TYPE = "application/json";
 const CONNECT_PROTOCOL_VERSION = "1";
-const CONTROLLER_BASE = "/controller.v1.DemoControllerService";
+const CONTROLLER_BASE = (document.querySelector('meta[name="controller-base"]') || {}).content || "/controller.v1.DemoControllerService";
 // Base URL for demo requests to Envoy. Same-origin "/envoy" by default (path
 // routed to Envoy by the LB/CDN); override with <meta name="envoy-base"
 // content="https://envoy.example.com"> to call Envoy cross-origin (needs CORS).
