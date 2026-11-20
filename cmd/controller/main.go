@@ -47,13 +47,7 @@ func envOr(key, fallback string) string {
 func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
 	controllerPath, controllerHandler := v1connect.NewDemoControllerServiceHandler(&controller.DemoControllerHandler{Controller: sessCtrl})
-	mux.Handle(controllerPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			writeCorsPreflight(w, r)
-			return
-		}
-		controllerHandler.ServeHTTP(w, r)
-	}))
+	mux.Handle(controllerPath, corsHandler(controllerHandler))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -68,13 +62,7 @@ func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 			req.URL.Path = "/"
 		},
 	}
-	mux.Handle("/envoy/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			writeCorsPreflight(w, r)
-			return
-		}
-		envoyProxy.ServeHTTP(w, r)
-	}))
+	mux.Handle("/envoy/", corsHandler(envoyProxy))
 	return mux, controllerPath
 }
 
@@ -89,6 +77,20 @@ func writeCorsPreflight(w http.ResponseWriter, r *http.Request) {
 	h.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Content-Type, Connect-Protocol-Version, X-Http-Method-Override, X-Request-Id, X-Demo-Session-Id, X-Demo-Target-Lang, Authorization")
 	h.Set("Access-Control-Max-Age", "86400")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// corsHandler wraps a browser-facing controller handler: it answers CORS
+// preflights (OPTIONS) and attaches the CORS headers to actual responses, so
+// the standalone web origin can drive the controller cross-origin.
+func corsHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			writeCorsPreflight(w, r)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
