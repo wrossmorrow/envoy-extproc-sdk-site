@@ -158,3 +158,75 @@ func TestDemoProcessorAppliesCancelDecision(t *testing.T) {
 		t.Fatalf("expected a processing response, got nil")
 	}
 }
+
+func TestDemoProcessorRejectsMissingAndUnknownSessions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ctrl := controller.NewSessionController()
+	grpcServer := grpc.NewServer()
+	v1.RegisterDemoProcessorServiceServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: ctrl})
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen controller: %v", err)
+	}
+	go grpcServer.Serve(lis)
+	defer grpcServer.Stop()
+
+	proc := NewRequestProcessor(lis.Addr().String())
+	sopts := &extproc.ServerOptions{ExtProcPort: 50056, MetricsHTTPPort: 9097, TerminationGracePeriodSeconds: 10}
+	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
+	time.Sleep(700 * time.Millisecond)
+
+	extprocConn, err := grpc.NewClient("127.0.0.1:50056", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("connect extproc: %v", err)
+	}
+	defer extprocConn.Close()
+
+	// 1. Missing x-demo-session-id -> immediate 400 without calling controller.
+	stream1, err := epb.NewExternalProcessorClient(extprocConn).Process(ctx)
+	if err != nil {
+		t.Fatalf("open stream 1: %v", err)
+	}
+	if err = stream1.Send(&epb.ProcessingRequest{
+		Request: &epb.ProcessingRequest_RequestHeaders{
+			RequestHeaders: &epb.HttpHeaders{
+				Headers:     &corev3.HeaderMap{Headers: []*corev3.HeaderValue{{Key: ":method", Value: "GET"}}},
+				EndOfStream: true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("send missing-session request: %v", err)
+	}
+	resp1, err := stream1.Recv()
+	if err != nil {
+		t.Fatalf("recv missing-session response: %v", err)
+	}
+	if resp1.GetImmediateResponse() == nil || resp1.GetImmediateResponse().GetStatus().GetCode() != 400 {
+		t.Fatalf("missing session response = %+v, want immediate 400", resp1)
+	}
+
+	// 2. Unknown session id -> controller returns NotFound -> immediate 404.
+	stream2, err := epb.NewExternalProcessorClient(extprocConn).Process(ctx)
+	if err != nil {
+		t.Fatalf("open stream 2: %v", err)
+	}
+	if err = stream2.Send(&epb.ProcessingRequest{
+		Request: &epb.ProcessingRequest_RequestHeaders{
+			RequestHeaders: &epb.HttpHeaders{
+				Headers:     &corev3.HeaderMap{Headers: []*corev3.HeaderValue{{Key: "x-demo-session-id", Value: "does-not-exist"}}},
+				EndOfStream: true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("send unknown-session request: %v", err)
+	}
+	resp2, err := stream2.Recv()
+	if err != nil {
+		t.Fatalf("recv unknown-session response: %v", err)
+	}
+	if resp2.GetImmediateResponse() == nil || resp2.GetImmediateResponse().GetStatus().GetCode() != 404 {
+		t.Fatalf("unknown session response = %+v, want immediate 404", resp2)
+	}
+}

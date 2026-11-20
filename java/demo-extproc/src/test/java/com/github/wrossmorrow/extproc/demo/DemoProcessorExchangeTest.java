@@ -96,7 +96,12 @@ class DemoProcessorExchangeTest {
                         Decision decision = null;
                         Function<ProcessRequest, Decision> provider = decisionProvider;
                         if (provider != null) {
-                          decision = provider.apply(request);
+                          try {
+                            decision = provider.apply(request);
+                          } catch (io.grpc.StatusRuntimeException e) {
+                            responseObserver.onError(e);
+                            return;
+                          }
                         } else if (forcedDecision != null) {
                           decision = forcedDecision;
                         } else {
@@ -593,6 +598,52 @@ class DemoProcessorExchangeTest {
     } finally {
       controllerResponds = true;
     }
+  }
+
+  @Test
+  void demoReturnsImmediate400WhenSessionHeaderIsMissingWithoutCallingController()
+      throws Exception {
+    int beforeStreams = controllerStreamsOpened.get();
+    Map<String, String> headers = new HashMap<>();
+    headers.put(":method", "GET");
+    headers.put(":path", "/");
+
+    TestExchangeStream exchange = openExchange();
+    exchange.send(
+        envoyHeadersRequest(ProcessingRequest.RequestCase.REQUEST_HEADERS, headers, true));
+    ProcessingResponse response = exchange.awaitResponse(5);
+
+    assertEquals(ProcessingResponse.ResponseCase.IMMEDIATE_RESPONSE, response.getResponseCase());
+    assertEquals(400, response.getImmediateResponse().getStatus().getCode().getNumber());
+    assertEquals("missing x-demo-session-id header", response.getImmediateResponse().getBody());
+    assertTrue(exchange.awaitCompleted(5));
+    assertEquals(
+        beforeStreams,
+        controllerStreamsOpened.get(),
+        "missing session header must not open a controller stream");
+  }
+
+  @Test
+  void demoReturnsImmediate404WhenControllerReportsSessionNotFound() throws Exception {
+    decisionProvider =
+        req -> {
+          throw Status.NOT_FOUND.withDescription("session not found").asRuntimeException();
+        };
+
+    Map<String, String> headers = new HashMap<>();
+    headers.put("x-demo-session-id", "nonexistent-session");
+    headers.put(":method", "GET");
+    headers.put(":path", "/");
+
+    TestExchangeStream exchange = openExchange();
+    exchange.send(
+        envoyHeadersRequest(ProcessingRequest.RequestCase.REQUEST_HEADERS, headers, true));
+    ProcessingResponse response = exchange.awaitResponse(5);
+
+    assertEquals(ProcessingResponse.ResponseCase.IMMEDIATE_RESPONSE, response.getResponseCase());
+    assertEquals(404, response.getImmediateResponse().getStatus().getCode().getNumber());
+    assertEquals("session not found", response.getImmediateResponse().getBody());
+    assertTrue(exchange.awaitCompleted(5));
   }
 
   // ------------------------------------------------------------------
