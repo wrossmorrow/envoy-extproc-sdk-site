@@ -48,7 +48,7 @@ static_resources:
                           redirect:
                             host_redirect: "envoy-extproc-sdk.app"
                             https_redirect: true
-                            response_code: MOVED_PERMANENTLY
+                            response_code: PERMANENT_REDIRECT
                           typed_per_filter_config:
                             envoy.filters.http.ext_proc:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
