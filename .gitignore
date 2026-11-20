@@ -37,3 +37,10 @@ bin/
 # Gradle build output and caches (java/demo-extproc)
 build/
 .gradle/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+.terraform.lock.hcl

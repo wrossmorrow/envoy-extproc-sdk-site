@@ -1,0 +1,43 @@
+# Production override for EC2 + NLB deployment:
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# Pulls prebuilt images from ECR and exposes only Envoy's listener port (8000)
+# to the host so the NLB forwards TLS-terminated traffic directly to Envoy.
+services:
+
+  envoy:
+    ports: !override
+      - "8000:8000"
+    depends_on:
+      - upstream
+      - controller
+      - web
+      - extproc
+      - extproc-rust
+      - extproc-java
+    restart: unless-stopped
+
+  upstream:
+    restart: unless-stopped
+
+  controller:
+    image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/controller:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+  web:
+    image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+  extproc:
+    image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+  extproc-rust:
+    image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/rust:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+  extproc-java:
+    image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/java:${IMAGE_TAG:-latest}
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    restart: unless-stopped

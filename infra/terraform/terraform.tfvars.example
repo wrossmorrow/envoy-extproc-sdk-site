@@ -1,0 +1,12 @@
+aws_region      = "us-west-2"
+ecr_registry    = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
+ecr_repo_prefix = "envoy-extproc-sdk-site"
+image_tag       = "latest"
+instance_type   = "t3.medium"
+
+domains = [
+  { fqdn = "example1.com", zone_name = "example1.com" },
+  { fqdn = "example2.com", zone_name = "example2.com" },
+  { fqdn = "example3.com", zone_name = "example3.com" },
+  { fqdn = "example4.com", zone_name = "example4.com" },
+]
