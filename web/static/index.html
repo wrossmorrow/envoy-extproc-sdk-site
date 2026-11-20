@@ -20,7 +20,7 @@
         </div>
         <div class="session">
           <span class="session-dot" id="session-dot" aria-hidden="true"></span>
-          <span id="session-label">Connecting…</span>
+          <button type="button" class="session-id" id="session-label" disabled>Connecting…</button>
           <button type="button" class="ghost small" id="new-session">New session</button>
         </div>
       </div>
@@ -62,6 +62,12 @@
             <div class="presets" id="presets" aria-label="Presets"></div>
           </div>
 
+          <div class="experiments">
+            <span class="field-label">Try this</span>
+            <div class="experiment-list" id="experiments" aria-label="Experiments"></div>
+            <p class="experiment-goal" id="experiment-goal" hidden></p>
+          </div>
+
           <div class="request-line">
             <label class="sr-only" for="req-method">Method</label>
             <select id="req-method">
@@ -92,6 +98,7 @@
               <span class="badge" id="response-status"></span>
               <span class="hint" id="response-meta"></span>
             </div>
+            <p class="explain" id="response-explain" hidden></p>
             <details id="response-headers-wrap">
               <summary>Headers</summary>
               <pre id="response-headers"></pre>
