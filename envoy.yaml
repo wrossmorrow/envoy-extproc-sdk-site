@@ -87,19 +87,19 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
                               disabled: true
 
-                        # Browser document load on "/" -> web:8000, bypassing ext_proc.
-                        # Direct API calls (POST /, curl GET /, or requests with
-                        # x-demo-session-id) fall through to upstream + ext_proc below.
+                        # Document load on "/" -> web:8000, bypassing ext_proc. Any GET or
+                        # HEAD without a demo session id is a page load: browsers, but also
+                        # link-preview crawlers (Slack, LinkedIn), which don't reliably send
+                        # Accept: text/html and sometimes probe with HEAD. Demo requests
+                        # always carry x-demo-session-id and fall through to ext_proc below.
                         - name: web-root
                           match:
                             path: "/"
                             headers:
                               - name: ":method"
                                 string_match:
-                                  exact: "GET"
-                              - name: "accept"
-                                string_match:
-                                  contains: "text/html"
+                                  safe_regex:
+                                    regex: "^(GET|HEAD)$"
                               - name: "x-demo-session-id"
                                 present_match: false
                           route:
