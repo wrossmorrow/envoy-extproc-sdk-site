@@ -28,13 +28,12 @@ import io.grpc.stub.StreamObserver;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
 
 /**
@@ -65,9 +64,11 @@ public class DemoRequestProcessor implements RequestProcessor {
   // RequestContext custom data keys (the context persists across phases of an exchange).
   static final String CONTROLLER_STREAM_KEY = "controllerDemoStream";
   static final String CONTROLLER_RESPONSE_KEY = "controllerDemoResponseObserver";
-  static final String CONTROLLER_DECISION_KEY = "controllerDemoDecision";
+  static final String CONTROLLER_DECISIONS_KEY = "controllerDemoDecisions";
+  static final String CONTROLLER_DECISION_RECEIVED_KEY = "controllerDemoDecisionReceived";
   static final String CONTROLLER_SESSION_ID_KEY = "controllerDemoSessionID";
   static final String SNAPSHOT_NAMES_KEY = "controllerDemoSnapshotHeaderNames";
+  static final String CONTROLLER_CALL_KEY = "controllerDemoCall";
 
   private static final Logger logger = Logger.getLogger(DemoRequestProcessor.class.getName());
 
@@ -224,11 +225,12 @@ public class DemoRequestProcessor implements RequestProcessor {
   public void errorHandler(RequestContext ctx, RequestCase phase, Throwable err) {
     if (isStreamCancelled(err)) {
       // Envoy tore the downstream down and cancelled the extproc stream; treat it as the
-      // cancellation signal for this exchange phase and clean up the controller stream handle
-      // held in the request context.
-      retireStream(ctx);
+      // cancellation signal for this exchange phase and abort the controller stream handle held in
+      // the request context.
+      abortStream(ctx, "downstream extproc stream cancelled", err);
       return;
     }
+    abortStream(ctx, "demo processor error", err);
     logger.severe(
         "Demo processor error: phase="
             + phaseName(phase)
@@ -284,37 +286,47 @@ public class DemoRequestProcessor implements RequestProcessor {
       retireStream(ctx);
       Cancel cancelDecision = action.getCancel();
       ctx.cancelRequest(
-          cancelDecision.getStatus(), cancelDecision.getHeaders(), cancelDecision.getBody());
+          cancelDecision.getStatus(),
+          filterMutableHeaders(cancelDecision.getHeaders()),
+          cancelDecision.getBody());
       return;
     }
+    boolean replacedResponseOnHeaders = false;
     if (action != null && action.getActionCase() == Decision.ActionCase.CONTINUE) {
       Continue continueDecision = action.getContinue();
-      applyDecision(ctx, continueDecision);
+      applyDecision(ctx, phase, continueDecision);
       logPhaseDecisionSent(phase, continueDecision);
+      replacedResponseOnHeaders =
+          phase == RequestCase.RESPONSE_HEADERS && continueDecision.hasBody();
     }
-    if (responsePhase && endOfStream) {
-      // The phase signaled end-of-stream during a response phase, which marks the end of the
-      // direction the demo retires on. End-of-stream marks the end of a single direction (e.g. the
-      // request headers for a bodyless GET), not the end of the exchange, so retire only for
-      // response phases; otherwise keep the handle in the request context for the next phase.
+    if (responsePhase && (endOfStream || replacedResponseOnHeaders)) {
+      // Finalize and retire the controller stream when a response phase ends the exchange: either
+      // Envoy signaled end-of-stream on the response direction, or RESPONSE_HEADERS returned
+      // CONTINUE_AND_REPLACE with a replacement body (in which case Envoy replaces the response
+      // body immediately and never sends RESPONSE_BODY even though end_of_stream was false).
       retireStream(ctx);
       ctx.setProcessingComplete();
-    } else if (!responsePhase && endOfStream) {
-      // A request phase that signaled end-of-stream ends the direction as well (e.g. a bodyless
-      // GET reporting the request headers phase as its final phase).
-      ctx.setProcessingComplete();
     }
+    // NOTE: end-of-stream during a request phase (e.g. the final REQUEST_BODY of a POST, or
+    // REQUEST_HEADERS of a bodyless GET) ends that direction only; the exchange continues with the
+    // response phases, so we must not finalize here.
   }
 
   protected ProcessResponse sendPhaseAndDecide(
       RequestContext ctx, RequestCase phase, String sessionID, HttpSnapshot snapshot) {
-    CompletableFuture<ProcessResponse> decisionFuture =
-        (CompletableFuture<ProcessResponse>) ctx.getValue(CONTROLLER_DECISION_KEY);
-    final CompletableFuture<ProcessResponse> decision =
-        decisionFuture == null ? new CompletableFuture<>() : decisionFuture;
-    if (decisionFuture == null) {
-      ctx.setValue(CONTROLLER_DECISION_KEY, decision);
+    LinkedBlockingQueue<Object> decisions =
+        (LinkedBlockingQueue<Object>) ctx.getValue(CONTROLLER_DECISIONS_KEY);
+    final LinkedBlockingQueue<Object> phaseDecisions =
+        decisions != null ? decisions : new LinkedBlockingQueue<>();
+    if (decisions == null) {
+      ctx.setValue(CONTROLLER_DECISIONS_KEY, phaseDecisions);
     }
+    Object decisionReceivedValue = ctx.getValue(CONTROLLER_DECISION_RECEIVED_KEY);
+    final java.util.concurrent.atomic.AtomicBoolean decisionReceived =
+        decisionReceivedValue instanceof java.util.concurrent.atomic.AtomicBoolean
+            ? (java.util.concurrent.atomic.AtomicBoolean) decisionReceivedValue
+            : new java.util.concurrent.atomic.AtomicBoolean();
+    ctx.setValue(CONTROLLER_DECISION_RECEIVED_KEY, decisionReceived);
     StreamObserver<ProcessResponse> responseObserver =
         (StreamObserver<ProcessResponse>) ctx.getValue(CONTROLLER_RESPONSE_KEY);
     if (responseObserver == null) {
@@ -322,45 +334,64 @@ public class DemoRequestProcessor implements RequestProcessor {
           new StreamObserver<ProcessResponse>() {
             @Override
             public void onNext(ProcessResponse value) {
-              decision.complete(value);
+              phaseDecisions.offer(value);
+              decisionReceived.set(true);
             }
 
             @Override
             public void onError(Throwable t) {
-              decision.completeExceptionally(t);
+              phaseDecisions.offer(t);
+              decisionReceived.set(true);
             }
 
             @Override
             public void onCompleted() {
-              decision.completeExceptionally(
-                  new IllegalStateException("controller closed phase stream without a decision"));
+              // The controller may close the phase stream right after sending a decision (e.g. a
+              // final phase); only report a missing decision when nothing was sent for the phase.
+              if (!decisionReceived.get()) {
+                phaseDecisions.offer(
+                    new IllegalStateException("controller closed phase stream without a decision"));
+              }
             }
           };
       ctx.setValue(CONTROLLER_RESPONSE_KEY, responseObserver);
     }
+    // Phases are resolved one at a time over this stream, so clear any decision received for a
+    // previous phase before asking for the next one.
+    decisionReceived.set(false);
     StreamObserver<ProcessRequest> sender = controllerStream(ctx, responseObserver);
-    sender.onNext(
-        ProcessRequest.newBuilder()
-            .setSessionId(sessionID)
-            .setPhase(phaseOf(phase))
-            .setSnapshot(snapshot)
-            .build());
     try {
-      return decision.get(exchangeTimeoutSeconds, TimeUnit.SECONDS);
+      sender.onNext(
+          ProcessRequest.newBuilder()
+              .setSessionId(sessionID)
+              .setPhase(phaseOf(phase))
+              .setSnapshot(snapshot)
+              .build());
+    } catch (RuntimeException e) {
+      abortStream(ctx, "failed to send phase update to controller", e);
+      throw e;
+    }
+    try {
+      Object next = phaseDecisions.poll(exchangeTimeoutSeconds, TimeUnit.SECONDS);
+      if (next == null) {
+        RuntimeException timeout =
+            new RuntimeException("timed out waiting for controller decision");
+        abortStream(ctx, "timed out waiting for controller decision", timeout);
+        throw timeout;
+      }
+      if (next instanceof RuntimeException e) {
+        abortStream(ctx, "controller phase exchange failed", e);
+        throw e;
+      }
+      if (next instanceof Throwable t) {
+        abortStream(ctx, "controller phase exchange failed", t);
+        throw new RuntimeException("controller phase exchange failed", t);
+      }
+      return (ProcessResponse) next;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      abortStream(ctx, "interrupted waiting for controller decision", e);
       throw new RuntimeException("timed out waiting for controller decision", e);
-    } catch (TimeoutException e) {
-      throw new RuntimeException("timed out waiting for controller decision", e);
-    } catch (ExecutionException e) {
-      Throwable cause = e.getCause();
-      if (cause instanceof RuntimeException) {
-        throw (RuntimeException) cause;
-      }
-      if (cause instanceof Error) {
-        throw (Error) cause;
-      }
-      throw new RuntimeException("controller phase exchange failed", cause);
     }
   }
 
@@ -377,38 +408,92 @@ public class DemoRequestProcessor implements RequestProcessor {
     MethodDescriptor<ProcessRequest, ProcessResponse> method =
         DemoProcessorServiceGrpc.getProcessMethod();
     ManagedChannel channel = controllerChannel();
-    ClientCall<ProcessRequest, ProcessResponse> call = channel.newCall(method, CallOptions.DEFAULT);
+    CallOptions callOptions =
+        CallOptions.DEFAULT.withDeadlineAfter(exchangeTimeoutSeconds, TimeUnit.SECONDS);
+    ClientCall<ProcessRequest, ProcessResponse> call = channel.newCall(method, callOptions);
     StreamObserver<ProcessRequest> sender =
         ClientCalls.asyncBidiStreamingCall(call, responseObserver);
     ctx.setValue(CONTROLLER_STREAM_KEY, sender);
     ctx.setValue(CONTROLLER_RESPONSE_KEY, responseObserver);
+    ctx.setValue(CONTROLLER_CALL_KEY, call);
     return sender;
   }
 
-  protected void applyDecision(RequestContext ctx, Continue continueDecision) {
-    if (continueDecision.getRemoveHeadersList().size() > 0) {
-      ctx.removeHeaders(continueDecision.getRemoveHeadersList());
+  protected void applyDecision(RequestContext ctx, RequestCase phase, Continue continueDecision) {
+    // Header mutations apply to headers and trailers phases only; body phases must not carry
+    // HeaderMutations (for instance, the web UI keeps sticky set-headers across phases).
+    // Disallowed HTTP/2 ':pseudo-headers' (such as :method, :path, :status, :authority echoed from
+    // snapshots) are filtered out because Envoy rejects them under default HeaderMutationRules.
+    if (isHeadersPhase(phase) || isTrailersPhase(phase)) {
+      List<String> removable = filterMutableHeaderNames(continueDecision.getRemoveHeadersList());
+      if (!removable.isEmpty()) {
+        ctx.removeHeaders(removable);
+      }
+      Map<String, String> continueHeaders = filterMutableHeaders(continueDecision.getHeaders());
+      for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
+        ctx.overwriteHeader(entry.getKey(), entry.getValue());
+      }
+      if (isHeadersPhase(phase)) {
+        ctx.addHeader(PROCESSED_HEADER, "true");
+      }
     }
     if (continueDecision.hasBody()) {
-      ctx.replaceBody(continueDecision.getBody().toByteArray());
-      // Envoy only applies body mutations on a CONTINUE_AND_REPLACE decision; a plain CONTINUE
-      // leaves the phase response without replace semantics while still carrying the mutation.
-      ctx.continueAndReplace();
-    } else {
-      // A continue without a body must not leave a staged body mutation behind; clear it so envoy
-      // does not validate a body mutation against a content length that no longer matches.
-      ctx.clearBody();
+      byte[] bodyBytes = continueDecision.getBody().toByteArray();
+      if (isHeadersPhase(phase)) {
+        // In envoy-extproc-sdk-java 0.3.1-alpha2+, replaceBody(byte[]) delegates 0-length arrays
+        // to clearBody() and updates content-length when RequestContext is in a headers phase.
+        // Envoy requires CONTINUE_AND_REPLACE to apply body mutations from a headers phase.
+        ctx.replaceBody(bodyBytes);
+        ctx.continueAndReplace();
+      } else if (isBodyPhase(phase)) {
+        // For body phases the mutation rides on a plain CONTINUE without HeaderMutations.
+        if (bodyBytes.length == 0) {
+          ctx.clearBodyChunk();
+        } else {
+          ctx.replaceBodyChunk(bodyBytes);
+        }
+      }
+      // Trailers phases ignore stray body mutations.
     }
-    Map<String, String> continueHeaders = continueDecision.getHeaders();
-    for (Map.Entry<String, String> entry : continueHeaders.entrySet()) {
-      ctx.overwriteHeader(entry.getKey(), entry.getValue());
+  }
+
+  protected boolean isMutableHeaderName(String name) {
+    if (name == null) {
+      return false;
     }
-    ctx.addHeader(PROCESSED_HEADER, "true");
+    String trimmed = name.trim();
+    return !trimmed.isEmpty() && !trimmed.startsWith(":");
+  }
+
+  protected List<String> filterMutableHeaderNames(List<String> names) {
+    List<String> filtered = new ArrayList<>();
+    if (names == null) {
+      return filtered;
+    }
+    for (String name : names) {
+      if (isMutableHeaderName(name)) {
+        filtered.add(name.trim());
+      }
+    }
+    return filtered;
+  }
+
+  protected Map<String, String> filterMutableHeaders(Map<String, String> headers) {
+    Map<String, String> filtered = new LinkedHashMap<>();
+    if (headers == null) {
+      return filtered;
+    }
+    for (Map.Entry<String, String> entry : headers.entrySet()) {
+      if (isMutableHeaderName(entry.getKey()) && entry.getValue() != null) {
+        filtered.put(entry.getKey().trim(), entry.getValue());
+      }
+    }
+    return filtered;
   }
 
   /**
-   * Logs a phase decision received from the controller for the phase being resolved, including
-   * the body mutation and header changes the decision carries.
+   * Logs a phase decision received from the controller for the phase being resolved, including the
+   * body mutation and header changes the decision carries.
    */
   protected void logPhaseDecisionReceived(RequestCase phase, Decision action) {
     String phaseName = phaseName(phase);
@@ -453,7 +538,7 @@ public class DemoRequestProcessor implements RequestProcessor {
   protected void logPhaseDecisionSent(RequestCase phase, Continue continueDecision) {
     String phaseName = phaseName(phase);
     ResponseStatus envoyStatus =
-        continueDecision.hasBody()
+        continueDecision.hasBody() && isHeadersPhase(phase)
             ? ResponseStatus.CONTINUE_AND_REPLACE
             : ResponseStatus.CONTINUE;
     logger.info(
@@ -470,14 +555,35 @@ public class DemoRequestProcessor implements RequestProcessor {
   protected void retireStream(RequestContext ctx) {
     StreamObserver<ProcessRequest> sender =
         (StreamObserver<ProcessRequest>) ctx.getValue(CONTROLLER_STREAM_KEY);
+    clearControllerStreamState(ctx);
     if (sender != null) {
       try {
         sender.onCompleted();
       } catch (Exception e) {
-        // best effort retire of the controller phase stream
+        // best effort half-close of the controller phase stream
       }
     }
+  }
+
+  protected void abortStream(RequestContext ctx, String reason, Throwable cause) {
+    ClientCall<ProcessRequest, ProcessResponse> call =
+        (ClientCall<ProcessRequest, ProcessResponse>) ctx.getValue(CONTROLLER_CALL_KEY);
+    clearControllerStreamState(ctx);
+    if (call != null) {
+      try {
+        call.cancel(reason, cause);
+      } catch (Exception e) {
+        // best effort cancel of the controller phase call
+      }
+    }
+  }
+
+  private void clearControllerStreamState(RequestContext ctx) {
     ctx.setValue(CONTROLLER_STREAM_KEY, null);
+    ctx.setValue(CONTROLLER_RESPONSE_KEY, null);
+    ctx.setValue(CONTROLLER_DECISIONS_KEY, null);
+    ctx.setValue(CONTROLLER_DECISION_RECEIVED_KEY, null);
+    ctx.setValue(CONTROLLER_CALL_KEY, null);
   }
 
   // ------------------------------------------------------------------
@@ -557,7 +663,49 @@ public class DemoRequestProcessor implements RequestProcessor {
     return false;
   }
 
+  protected boolean isHeadersPhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
+    switch (phase) {
+      case REQUEST_HEADERS:
+      case RESPONSE_HEADERS:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  protected boolean isBodyPhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
+    switch (phase) {
+      case REQUEST_BODY:
+      case RESPONSE_BODY:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  protected boolean isTrailersPhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
+    switch (phase) {
+      case REQUEST_TRAILERS:
+      case RESPONSE_TRAILERS:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   protected boolean isResponsePhase(RequestCase phase) {
+    if (phase == null) {
+      return false;
+    }
     switch (phase) {
       case RESPONSE_HEADERS:
       case RESPONSE_BODY:

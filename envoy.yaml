@@ -51,6 +51,34 @@ static_resources:
                                   response_body_mode: BUFFERED
                                   request_trailer_mode: SKIP
                                   response_trailer_mode: SKIP
+                        # Route to the Java demo extproc when the request carries
+                        # `x-demo-target-lang: java`. Requests without the header (or
+                        # with any other value) fall through to the default route
+                        # below, which uses the Go demo extproc.
+                        - name: extproc-java
+                          match:
+                            prefix: "/"
+                            headers:
+                              - name: x-demo-target-lang
+                                string_match:
+                                  exact: java
+                          route:
+                            cluster: upstream
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              overrides:
+                                grpc_service:
+                                  envoy_grpc:
+                                    cluster_name: extproc-java
+                                failure_mode_allow: false
+                                processing_mode:
+                                  request_header_mode: SEND
+                                  response_header_mode: SEND
+                                  request_body_mode: BUFFERED
+                                  response_body_mode: BUFFERED
+                                  request_trailer_mode: SKIP
+                                  response_trailer_mode: SKIP
                         # Default demo target: no x-demo-target-lang header (or any
                         # language without a more specific route) -> golang extproc.
                         - match:
@@ -143,6 +171,25 @@ static_resources:
                 address:
                   socket_address:
                     address: extproc-rust
+                    port_value: 50051
+    type: LOGICAL_DNS
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+  - name: extproc-java
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: extproc-java
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                hostname: extproc-java
+                address:
+                  socket_address:
+                    address: extproc-java
                     port_value: 50051
     type: LOGICAL_DNS
     typed_extension_protocol_options:
