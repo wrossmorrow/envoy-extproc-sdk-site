@@ -151,9 +151,17 @@
           <li><strong>Rejecting is an immediate response.</strong> At a request phase the upstream never sees the request. At a response phase it already has; you only replace what the browser gets.</li>
           <li><strong>It fails closed.</strong> If nobody decides before the phase deadline, the controller answers with a rejection, so a stalled human can't leave a request hanging forever.</li>
           <li><strong>Each phase is one round trip on long-lived streams.</strong> One ext_proc stream per exchange between Envoy and the processor, mirrored by one Process stream to the controller, both closed when the exchange ends.</li>
+          <li><strong>Each extproc is implemented using SDKs linked below.</strong> These are open source public SDKs intending to help make programming for this feature easy.</li>
         </ul>
       </section>
     </main>
+    <footer>
+      <a href="https://www.envoyproxy.io/">Envoy</a>
+      <a href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter">External Processing</a>
+      <a href="https://github.com/wrossmorrow/envoy-extproc-sdk-go">Go SDK</a>
+      <a href="https://github.com/wrossmorrow/envoy-extproc-sdk-rust">Rust SDK</a>
+      <a href="https://github.com/wrossmorrow/envoy-extproc-sdk-java">Java SDK</a>
+    </footer>
 
     <script>
       "use strict";
