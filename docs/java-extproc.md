@@ -56,5 +56,5 @@ the Go and Rust demo extprocs.
 
 - Controller implementation in Java (the Go controller is the controller).
 - Proto changes (the `controller/v1` surface is settled).
-- Frontend (`internal/web`) changes.
+- Frontend (`web`) changes.
 - CI workflow changes (see repo instructions: never modify CI config here).

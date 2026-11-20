@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,7 +19,6 @@ import (
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
 	controller "github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
-	"github.com/wrossmorrow/envoy-extproc-sdk-site/internal/web/static"
 )
 
 const (
@@ -28,21 +26,10 @@ const (
 	grpcAddr   = "0.0.0.0:9093"
 )
 
-// envoyAddr is the upstream Envoy instance relaying envoy-bound demo
-// requests proxied through the demo web frontend.
-var envoyAddr = envOr("ENVOY_ADDR", "localhost:8081")
-
-// envOr returns the value of the environment variable named key, or fallback if unset.
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 // newMux builds the http.Handler for the demo controller service: the
-// human-facing Connect API, the interactive demo static frontend, and an envoy
-// reverse proxy for envoy-bound demo requests. All are served same-origin.
+// human-facing Connect API, healthz, and Prometheus metrics. The interactive
+// demo static frontend is served by cmd/web, and Envoy fronts all browser and
+// demo traffic on a single origin.
 func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
 	controllerPath, controllerHandler := v1connect.NewDemoControllerServiceHandler(&controller.DemoControllerHandler{Controller: sessCtrl})
@@ -54,14 +41,6 @@ func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 		handler := promhttp.HandlerFor(controller.MetricsRegistry(), promhttp.HandlerOpts{EnableOpenMetrics: true})
 		handler.ServeHTTP(w, r)
 	})
-	mux.Handle("/envoy/", &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = "http"
-			req.URL.Host = envoyAddr
-			req.URL.Path = "/"
-		},
-	})
-	mux.Handle("/", http.FileServer(http.FS(static.FS)))
 	return mux, controllerPath
 }
 

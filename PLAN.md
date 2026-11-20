@@ -118,7 +118,7 @@ browser (static site, CloudFront) ──TLS──▶ ALB/CloudFront ──▶ En
 ### Context
 
 The browser UI already has processor-implementation tabs (`Go`, `Rust`, `Java`,
-`Python`) driven by `state.lang` in `internal/web/static/app.js`, plus
+`Python`) driven by `state.lang` in `web/static/app.js`, plus
 `AVAILABLE_LANGS` flags for which backends are deployed. Demo requests are
 envoy-bound with the language encoded in the path (`/{lang}/orders`) and the
 session id in the `x-demo-session-id` header.
