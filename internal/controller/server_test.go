@@ -502,16 +502,16 @@ func TestSessionController_ReconnectAndReplayInFlightPhase(t *testing.T) {
 	cancel1()
 	<-done1
 
-	if _, err := c.GetSession(s.ID); err != nil {
-		t.Fatalf("GetSession() after stream disconnect = %v, want session preserved", err)
+	if _, getErr := c.GetSession(s.ID); getErr != nil {
+		t.Fatalf("GetSession() after stream disconnect = %v, want session preserved", getErr)
 	}
 
 	// Pause a phase, then reconnect via GetOrCreateSession + initialUpdateFor.
-	if err := c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
 		t.Fatalf("BeginPhase() error = %v", err)
 	}
 	snap := &v1.HttpSnapshot{Headers: []*v1.Header{{Key: ":method", Value: "POST"}}}
-	if err := c.SendUpdate(s.ID, &v1.CreateSessionResponse{
+	if err = c.SendUpdate(s.ID, &v1.CreateSessionResponse{
 		SessionId: s.ID,
 		Phase:     v1.Phase_PHASE_REQUEST_HEADERS,
 		Snapshot:  snap,
