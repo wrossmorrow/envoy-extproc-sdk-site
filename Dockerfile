@@ -8,6 +8,7 @@ RUN go mod download
 COPY gen/ gen/
 COPY cmd/ cmd/
 COPY internal/ internal/
+COPY web/ web/
 RUN CGO_ENABLED=0 go build -o /app/server ./cmd/${CMD}
 RUN go install github.com/grpc-ecosystem/grpc-health-probe@v0.4.39
 

@@ -20,7 +20,6 @@ import (
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	v1connect "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1/controllerv1connect"
 	controller "github.com/wrossmorrow/envoy-extproc-sdk-site/internal/controller"
-	"github.com/wrossmorrow/envoy-extproc-sdk-site/internal/web/static"
 )
 
 const (
@@ -41,12 +40,20 @@ func envOr(key, fallback string) string {
 }
 
 // newMux builds the http.Handler for the demo controller service: the
-// human-facing Connect API, the interactive demo static frontend, and an envoy
-// reverse proxy for envoy-bound demo requests. All are served same-origin.
+// human-facing Connect API and an envoy reverse proxy for envoy-bound demo
+// requests. The interactive demo static frontend is served by the standalone
+// web asset server (cmd/web), not here. Browser-facing endpoints answer CORS
+// preflights so the standalone web origin can drive the controller cross-origin.
 func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
 	controllerPath, controllerHandler := v1connect.NewDemoControllerServiceHandler(&controller.DemoControllerHandler{Controller: sessCtrl})
-	mux.Handle(controllerPath, controllerHandler)
+	mux.Handle(controllerPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			writeCorsPreflight(w, r)
+			return
+		}
+		controllerHandler.ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -54,15 +61,34 @@ func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 		handler := promhttp.HandlerFor(controller.MetricsRegistry(), promhttp.HandlerOpts{EnableOpenMetrics: true})
 		handler.ServeHTTP(w, r)
 	})
-	mux.Handle("/envoy/", &httputil.ReverseProxy{
+	envoyProxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
 			req.URL.Host = envoyAddr
 			req.URL.Path = "/"
 		},
-	})
-	mux.Handle("/", http.FileServer(http.FS(static.FS)))
+	}
+	mux.Handle("/envoy/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			writeCorsPreflight(w, r)
+			return
+		}
+		envoyProxy.ServeHTTP(w, r)
+	}))
 	return mux, controllerPath
+}
+
+// writeCorsPreflight answers an CORS preflight (OPTIONS) for the controller's
+// browser-facing endpoints with the headers the interactive demo frontend needs
+// to send cross-origin requests (Connect streaming, envoy-bound demo requests
+// with custom headers and JSON content types).
+func writeCorsPreflight(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+	h.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Content-Type, Connect-Protocol-Version, X-Http-Method-Override, X-Request-Id, X-Demo-Session-Id, X-Demo-Target-Lang, Authorization")
+	h.Set("Access-Control-Max-Age", "86400")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func main() {

@@ -49,6 +49,25 @@ services:
     networks:
       - demo
 
+  # static asset server for the interactive demo frontend
+  web:
+    image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-web:${WEB_VERSION:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CMD: web
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -q -O /dev/null http://localhost:9091/ || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+    networks:
+      - demo
+
   # extproc, integrated with envoy and holds requests for interactive handling
   extproc:
     image: ghcr.io/wrossmorrow/envoy-extproc-sdk-site-extproc:${EXTPROC_VERSION:-local}
