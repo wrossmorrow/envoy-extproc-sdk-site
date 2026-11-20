@@ -57,7 +57,7 @@ static_resources:
                         - name: web-assets
                           match:
                             safe_regex:
-                              regex: "^/(index\\.html|style\\.css|app\\.js|favicon\\.ico)$"
+                              regex: "^/(index\\.html|how\\.html|style\\.css|app\\.js|favicon\\.ico)$"
                             headers:
                               - name: "x-demo-session-id"
                                 present_match: false

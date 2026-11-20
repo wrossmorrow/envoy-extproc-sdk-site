@@ -304,3 +304,7 @@ button.session-id {
 }
 button.session-id:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); }
 button.session-id:disabled { opacity: 1; cursor: default; }
+
+/* Link to the how-it-works page, right-aligned in the tab row */
+.tabs .tab-link { margin-left: auto; align-self: center; font-size: 0.85rem; color: var(--text-2); text-decoration: none; padding: 0.5rem 0.25rem; }
+.tabs .tab-link:hover { color: var(--accent); text-decoration: underline; }
