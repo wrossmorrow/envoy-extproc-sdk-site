@@ -3,6 +3,12 @@
 #
 # Pulls prebuilt images from ECR and exposes only Envoy's listener port (8000)
 # to the host so the NLB forwards TLS-terminated traffic directly to Envoy.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   envoy:
@@ -15,29 +21,36 @@ services:
       - extproc
       - extproc-rust
       - extproc-java
+    logging: *default-logging
     restart: unless-stopped
 
   upstream:
+    logging: *default-logging
     restart: unless-stopped
 
   controller:
     image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/controller:${IMAGE_TAG:-latest}
+    logging: *default-logging
     restart: unless-stopped
 
   web:
     image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/web:${IMAGE_TAG:-latest}
+    logging: *default-logging
     restart: unless-stopped
 
   extproc:
     image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go:${IMAGE_TAG:-latest}
+    logging: *default-logging
     restart: unless-stopped
 
   extproc-rust:
     image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/rust:${IMAGE_TAG:-latest}
+    logging: *default-logging
     restart: unless-stopped
 
   extproc-java:
     image: ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/java:${IMAGE_TAG:-latest}
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m"
+    logging: *default-logging
     restart: unless-stopped
