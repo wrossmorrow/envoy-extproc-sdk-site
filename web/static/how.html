@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How the demo works</title>
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+      .how-main { max-width: 72rem; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
+      .how-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+      @media (max-width: 860px) { .how-grid { grid-template-columns: minmax(0, 1fr); } }
+
+      .diagram { width: 100%; height: auto; display: block; }
+      .diagram .node rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1; rx: 8; }
+      .diagram .node text { fill: var(--text); font: 600 14px ui-sans-serif, system-ui, sans-serif; }
+      .diagram .node .sub { fill: var(--text-3); font: 400 11px ui-sans-serif, system-ui, sans-serif; }
+      .diagram .node.active rect { stroke: var(--accent); stroke-width: 2; fill: var(--accent-bg); }
+      .diagram .node.human rect { stroke-dasharray: 4 3; }
+
+      .diagram .edge { stroke: var(--border); stroke-width: 1.5; fill: none; }
+      .diagram .edge.open { stroke: var(--border-strong); stroke-dasharray: 5 4; animation: flow 1.2s linear infinite; }
+      .diagram .edge.active { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: none; animation: none; }
+      .diagram .edge-label { fill: var(--text-3); font: 400 10.5px var(--mono); }
+      .diagram .edge-label.active { fill: var(--accent); font-weight: 600; }
+      .diagram .token { fill: var(--accent); }
+      .diagram .token.bad { fill: var(--bad); }
+      .diagram .lane-note { fill: var(--text-3); font: italic 11px ui-sans-serif, system-ui, sans-serif; }
+      @keyframes flow { to { stroke-dashoffset: -18; } }
+      @media (prefers-reduced-motion: reduce) { .diagram .edge.open { animation: none; } }
+
+      .controls { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
+      .controls .progress { margin-left: auto; font: 600 0.8rem var(--mono); color: var(--text-3); }
+
+      .caption h2 { font-size: 1.05rem; margin-bottom: 0.4rem; }
+      .caption p { margin: 0 0 0.6rem; color: var(--text-2); font-size: 0.92rem; }
+      .caption .msg-name { font: 600 0.8rem var(--mono); color: var(--accent); }
+
+      .steps { list-style: none; margin: 1rem 0 0; padding: 0; counter-reset: step; font-size: 0.85rem; }
+      .steps li { counter-increment: step; }
+      .steps button {
+        width: 100%; text-align: left; font-weight: 400; border: 0; border-radius: 6px;
+        background: none; color: var(--text-2); padding: 0.3rem 0.5rem; display: flex; gap: 0.5rem;
+      }
+      .steps button::before { content: counter(step); font: 600 0.75rem var(--mono); color: var(--text-3); min-width: 1.25rem; }
+      .steps button[aria-current="step"] { background: var(--accent-bg); color: var(--text); font-weight: 600; }
+      .steps button:hover { background: var(--surface-sunken); }
+
+      .notes { margin-top: 1.25rem; }
+      .notes h2 { margin-bottom: 0.5rem; }
+      .notes ul { margin: 0; padding-left: 1.1rem; color: var(--text-2); font-size: 0.9rem; }
+      .notes li { margin-bottom: 0.4rem; }
+      .back { font-size: 0.85rem; color: var(--text-2); }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner" style="padding-bottom: 1rem">
+        <div class="brand">
+          <h1>How the demo works</h1>
+          <p class="lede">
+            One request, step by step: who talks to whom, over which stream, and where you come in.
+          </p>
+        </div>
+        <a class="back" href="/">← Back to the demo</a>
+      </div>
+    </header>
+
+    <main class="how-main">
+      <div class="how-grid">
+        <section class="card">
+          <svg class="diagram" id="diagram" viewBox="0 0 760 430" role="img" aria-labelledby="diagram-title diagram-desc">
+            <title id="diagram-title">Demo architecture</title>
+            <desc id="diagram-desc">The browser talks to Envoy over HTTP and to the controller over a session stream. Envoy streams each phase to the processor, which relays it to the controller and waits for your decision. Envoy forwards the request to an echo upstream.</desc>
+
+            <!-- edges: request-side lines on top, return lines just below -->
+            <path class="edge" id="e-b2e" d="M180 82 H310" />
+            <path class="edge" id="e-e2b" d="M310 104 H180" />
+            <path class="edge" id="e-e2u" d="M450 82 H580" />
+            <path class="edge" id="e-u2e" d="M580 104 H450" />
+            <path class="edge" id="e-e2p" d="M362 125 V305" />
+            <path class="edge" id="e-p2e" d="M398 305 V125" />
+            <path class="edge" id="e-p2c" d="M310 327 H180" />
+            <path class="edge" id="e-c2p" d="M180 349 H310" />
+            <path class="edge" id="e-c2b" d="M92 305 V125" />
+            <path class="edge" id="e-b2c" d="M128 125 V305" />
+
+            <text class="edge-label" id="l-b2e" x="245" y="74" text-anchor="middle">HTTP</text>
+            <text class="edge-label" id="l-e2u" x="515" y="74" text-anchor="middle">HTTP</text>
+            <text class="edge-label" id="l-e2p" x="352" y="210" text-anchor="end">ext_proc</text>
+            <text class="edge-label" id="l-e2p2" x="352" y="223" text-anchor="end">gRPC stream</text>
+            <text class="edge-label" id="l-p2c" x="245" y="319" text-anchor="middle">Process stream</text>
+            <text class="edge-label" id="l-c2b" x="82" y="210" text-anchor="end">session</text>
+            <text class="edge-label" id="l-c2b2" x="82" y="223" text-anchor="end">stream</text>
+            <text class="edge-label" id="l-b2c" x="138" y="210">SubmitDecision</text>
+
+            <g class="node human" id="n-browser">
+              <rect x="40" y="62" width="140" height="62" />
+              <text x="110" y="89" text-anchor="middle">Browser</text>
+              <text class="sub" x="110" y="106" text-anchor="middle">this page, and you</text>
+            </g>
+            <g class="node" id="n-envoy">
+              <rect x="310" y="62" width="140" height="62" />
+              <text x="380" y="89" text-anchor="middle">Envoy</text>
+              <text class="sub" x="380" y="106" text-anchor="middle">ext_proc filter</text>
+            </g>
+            <g class="node" id="n-upstream">
+              <rect x="580" y="62" width="140" height="62" />
+              <text x="650" y="89" text-anchor="middle">Upstream</text>
+              <text class="sub" x="650" y="106" text-anchor="middle">echoes what it got</text>
+            </g>
+            <g class="node" id="n-controller">
+              <rect x="40" y="305" width="140" height="62" />
+              <text x="110" y="332" text-anchor="middle">Controller</text>
+              <text class="sub" x="110" y="349" text-anchor="middle">demo plumbing</text>
+            </g>
+            <g class="node" id="n-processor">
+              <rect x="310" y="305" width="140" height="62" />
+              <text x="380" y="332" text-anchor="middle">Processor</text>
+              <text class="sub" x="380" y="349" text-anchor="middle">Go · Rust · Java SDK</text>
+            </g>
+
+            <text class="lane-note" x="490" y="300">In production, the processor decides</text>
+            <text class="lane-note" x="490" y="315">on its own: auth, redaction, routing.</text>
+            <text class="lane-note" x="490" y="330">Here the controller hands that</text>
+            <text class="lane-note" x="490" y="345">decision to you.</text>
+
+            <circle class="token" id="token" r="7" cx="-20" cy="-20" />
+          </svg>
+
+          <div class="controls">
+            <button type="button" id="btn-prev">Back</button>
+            <button type="button" class="primary" id="btn-play">Play</button>
+            <button type="button" id="btn-next">Next</button>
+            <button type="button" class="ghost small" id="btn-restart">Restart</button>
+            <span class="progress" id="progress"></span>
+          </div>
+        </section>
+
+        <section class="card caption" aria-live="polite">
+          <h2 id="cap-title"></h2>
+          <div id="cap-body"></div>
+          <ol class="steps" id="steps"></ol>
+        </section>
+      </div>
+
+      <section class="card notes">
+        <h2>Worth noticing</h2>
+        <ul>
+          <li><strong>Envoy holds the request the whole time.</strong> Nothing is forwarded while a phase is paused. The processor only ever sends back instructions: mutations, or an immediate response.</li>
+          <li><strong>Phases only happen if there's something to process.</strong> A GET has no request body, so that phase is skipped. Trailer phases are switched off in this demo's Envoy config.</li>
+          <li><strong>Rejecting is an immediate response.</strong> At a request phase the upstream never sees the request. At a response phase it already has; you only replace what the browser gets.</li>
+          <li><strong>It fails closed.</strong> If nobody decides before the phase deadline, the controller answers with a rejection, so a stalled human can't leave a request hanging forever.</li>
+          <li><strong>Each phase is one round trip on long-lived streams.</strong> One ext_proc stream per exchange between Envoy and the processor, mirrored by one Process stream to the controller, both closed when the exchange ends.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script>
+      "use strict";
+
+      // Each step lights nodes, moves a token along one edge, and keeps some
+      // streams drawn as open (dashed, flowing).
+      const STEPS = [
+        {
+          title: "Open a session",
+          edge: "b2c", nodes: ["browser", "controller"], open: [],
+          body: "<p>When the page loads, it opens a long-lived <span class='msg-name'>CreateSession</span> stream to the controller. Everything the processor pauses on will be pushed down this stream to you.</p>",
+        },
+        {
+          title: "Send a request",
+          edge: "b2e", nodes: ["browser", "envoy"], open: ["c2b"],
+          body: "<p>You hit <em>Send request</em>. It goes to Envoy as an ordinary HTTP request, tagged with your session ID and the processor language you picked.</p>",
+        },
+        {
+          title: "Envoy asks the processor",
+          edge: "e2p", nodes: ["envoy", "processor"], open: ["c2b"],
+          body: "<p>Envoy's ext_proc filter opens a gRPC stream to the processor and sends a <span class='msg-name'>ProcessingRequest</span> with the request headers. Envoy now holds the request and waits.</p>",
+        },
+        {
+          title: "The processor relays it",
+          edge: "p2c", nodes: ["processor", "controller"], open: ["c2b", "e2p"],
+          body: "<p>A production processor would decide right here. This one forwards a snapshot of the phase (headers, body) to the controller over a <span class='msg-name'>Process</span> stream opened for this exchange.</p>",
+        },
+        {
+          title: "You see the pause",
+          edge: "c2b", nodes: ["controller", "browser"], open: ["c2b", "e2p", "p2c"],
+          body: "<p>The controller pushes the phase to your page over the session stream, with a deadline. That's the <em>Paused</em> panel and its countdown.</p>",
+        },
+        {
+          title: "You decide",
+          edge: "b2c", nodes: ["browser", "controller"], open: ["c2b", "e2p", "p2c"],
+          body: "<p>Continue (optionally setting or removing headers, or editing the body) or reject with a status. The page sends it with a unary <span class='msg-name'>SubmitDecision</span> call.</p>",
+        },
+        {
+          title: "The decision goes back",
+          edge: "c2p", nodes: ["controller", "processor"], open: ["c2b", "e2p", "p2c"],
+          body: "<p>The controller releases the waiting phase and sends your decision down the Process stream to the processor.</p>",
+        },
+        {
+          title: "The processor answers Envoy",
+          edge: "p2e", nodes: ["processor", "envoy"], open: ["c2b", "e2p", "p2c"],
+          body: "<p>The processor turns your decision into a <span class='msg-name'>ProcessingResponse</span>: header and body mutations to continue, or an <span class='msg-name'>ImmediateResponse</span> to reject.</p><p>The same loop repeats for the request body, if there is one.</p>",
+        },
+        {
+          title: "Envoy forwards upstream",
+          edge: "e2u", nodes: ["envoy", "upstream"], open: ["c2b", "e2p", "p2c"],
+          body: "<p>With the request phases done, Envoy sends the request, as modified, to the upstream. This one echoes back exactly what it received.</p>",
+        },
+        {
+          title: "The response comes back",
+          edge: "u2e", nodes: ["upstream", "envoy"], open: ["c2b", "e2p", "p2c"],
+          body: "<p>The upstream's response reaches Envoy, and the same pause-and-decide loop runs again for the response headers and response body.</p>",
+        },
+        {
+          title: "Response to the browser",
+          edge: "e2b", nodes: ["envoy", "browser"], open: ["c2b"],
+          body: "<p>Envoy sends the final response to your page. The exchange is over, so the processor closes its Process stream and Envoy closes the ext_proc stream. Your session stream stays open for the next request.</p>",
+        },
+      ];
+
+      const EDGE_LABELS = {
+        b2e: ["l-b2e"], e2b: ["l-b2e"], e2u: ["l-e2u"], u2e: ["l-e2u"],
+        e2p: ["l-e2p", "l-e2p2"], p2e: ["l-e2p", "l-e2p2"],
+        p2c: ["l-p2c"], c2p: ["l-p2c"], c2b: ["l-c2b", "l-c2b2"], b2c: ["l-b2c"],
+      };
+      // Stream pairs: an "open" stream draws both of its directions.
+      const PAIRS = { c2b: ["c2b", "b2c"], e2p: ["e2p", "p2e"], p2c: ["p2c", "c2p"] };
+
+      const STEP_MS = 3200;
+      const TRAVEL_MS = 900;
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      let current = 0;
+      let playing = false;
+      let timer = null;
+      let anim = null;
+
+      const $ = (id) => document.getElementById(id);
+
+      function render(index) {
+        current = index;
+        const step = STEPS[index];
+
+        document.querySelectorAll(".node").forEach((n) => n.classList.remove("active"));
+        step.nodes.forEach((n) => $("n-" + n).classList.add("active"));
+
+        document.querySelectorAll(".edge").forEach((e) => e.classList.remove("open", "active"));
+        document.querySelectorAll(".edge-label").forEach((l) => l.classList.remove("active"));
+        for (const o of step.open) for (const id of PAIRS[o] || [o]) $("e-" + id).classList.add("open");
+        $("e-" + step.edge).classList.add("active");
+        (EDGE_LABELS[step.edge] || []).forEach((id) => $(id).classList.add("active"));
+
+        $("cap-title").textContent = step.title;
+        $("cap-body").innerHTML = step.body;
+        $("progress").textContent = index + 1 + " / " + STEPS.length;
+        document.querySelectorAll("#steps button").forEach((b, i) => {
+          if (i === index) b.setAttribute("aria-current", "step");
+          else b.removeAttribute("aria-current");
+        });
+        moveToken(step.edge);
+      }
+
+      function moveToken(edge) {
+        const path = $("e-" + edge);
+        const token = $("token");
+        const total = path.getTotalLength();
+        if (anim) cancelAnimationFrame(anim);
+        if (reduceMotion) {
+          const end = path.getPointAtLength(total);
+          token.setAttribute("cx", end.x);
+          token.setAttribute("cy", end.y);
+          return;
+        }
+        const start = performance.now();
+        const tick = (now) => {
+          const t = Math.min(1, (now - start) / TRAVEL_MS);
+          const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          const p = path.getPointAtLength(eased * total);
+          token.setAttribute("cx", p.x);
+          token.setAttribute("cy", p.y);
+          if (t < 1) anim = requestAnimationFrame(tick);
+        };
+        anim = requestAnimationFrame(tick);
+      }
+
+      function go(index) {
+        render((index + STEPS.length) % STEPS.length);
+        if (playing) schedule();
+      }
+
+      function schedule() {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (current === STEPS.length - 1) {
+            setPlaying(false);
+            return;
+          }
+          go(current + 1);
+        }, STEP_MS);
+      }
+
+      function setPlaying(on) {
+        playing = on;
+        $("btn-play").textContent = on ? "Pause" : current === STEPS.length - 1 ? "Replay" : "Play";
+        clearTimeout(timer);
+        if (on) schedule();
+      }
+
+      function init() {
+        const list = $("steps");
+        STEPS.forEach((s, i) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = s.title;
+          b.addEventListener("click", () => {
+            setPlaying(false);
+            go(i);
+          });
+          const li = document.createElement("li");
+          li.append(b);
+          list.append(li);
+        });
+        $("btn-next").addEventListener("click", () => {
+          setPlaying(false);
+          go(current + 1);
+        });
+        $("btn-prev").addEventListener("click", () => {
+          setPlaying(false);
+          go(current - 1);
+        });
+        $("btn-restart").addEventListener("click", () => {
+          go(0);
+          setPlaying(true);
+        });
+        $("btn-play").addEventListener("click", () => {
+          if (!playing && current === STEPS.length - 1) go(0);
+          setPlaying(!playing);
+        });
+        render(0);
+        setPlaying(!reduceMotion);
+      }
+
+      init();
+    </script>
+  </body>
+</html>
