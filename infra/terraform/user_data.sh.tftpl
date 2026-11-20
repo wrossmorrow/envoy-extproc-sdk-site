@@ -1,0 +1,47 @@
+#!/bin/bash
+set -euo pipefail
+
+dnf install -y docker git
+systemctl enable --now docker
+
+# Install Docker Compose v2 CLI plugin
+mkdir -p /usr/local/lib/docker/cli-plugins
+ARCH="$(uname -m)"
+curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$${ARCH}" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+git clone --depth 1 --branch "${git_ref}" "${git_repo_url}" /opt/extproc-demo
+
+cat > /opt/extproc-demo/.env <<EOF
+ECR_REGISTRY=${ecr_registry}
+ECR_REPO_PREFIX=${ecr_repo_prefix}
+IMAGE_TAG=${image_tag}
+EOF
+
+cat > /etc/systemd/system/extproc-demo.service <<'EOF'
+[Unit]
+Description=Envoy ext_proc Demo Compose Stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/extproc-demo
+EnvironmentFile=/opt/extproc-demo/.env
+ExecStartPre=/bin/bash -c 'aws ecr get-login-password --region "${aws_region}" | docker login --username AWS --password-stdin "${ecr_registry}"'
+ExecStartPre=/usr/bin/docker compose -f compose.yaml -f compose.prod.yaml pull
+ExecStart=/usr/bin/docker compose -f compose.yaml -f compose.prod.yaml up --remove-orphans
+ExecStop=/usr/bin/docker compose -f compose.yaml -f compose.prod.yaml down
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable extproc-demo.service
+systemctl start --no-block extproc-demo.service

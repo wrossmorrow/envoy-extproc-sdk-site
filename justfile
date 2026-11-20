@@ -1,6 +1,9 @@
 image_name := "ghcr.io/wrossmorrow/envoy-extproc-sdk-site"
 image_tag := `git rev-parse --short HEAD`
 
+ecr_registry    := "396610714890.dkr.ecr.us-east-1.amazonaws.com"
+ecr_repo_prefix := "envoy-extproc-sdk-site"
+
 # list targets and exit
 default:
     just --list
@@ -108,3 +111,21 @@ up *flags="":
 # bring down compose
 down *flags="":
     docker compose down {{flags}}
+
+publish tag="latest":
+    #!/bin/bash
+
+    docker buildx build --push --platform=linux/arm64,linux/amd64 --build-arg CMD=web -t {{ ecr_registry }}/{{ ecr_repo_prefix }}/web:{{ tag }} .
+    docker buildx build --push --platform=linux/arm64,linux/amd64 --build-arg CMD=controller -t {{ ecr_registry }}/{{ ecr_repo_prefix }}/controller:{{ tag }} .
+    docker buildx build --push --platform=linux/arm64,linux/amd64 --build-arg CMD=extproc -t {{ ecr_registry }}/{{ ecr_repo_prefix }}/go:{{ tag }} .
+
+    docker buildx build --push --platform=linux/arm64,linux/amd64 -f Dockerfile.rust -t {{ ecr_registry }}/{{ ecr_repo_prefix }}/rust:{{ tag }} .
+
+    export GITHUB_ACTOR="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.user=([^ ]+)[ ]*$/\1/p' )"
+    export GITHUB_TOKEN="$( cat ~/.gradle/gradle.properties | sed -En 's/^gpr\.key=([^ ]+)[ ]*$/\1/p' )"
+    docker buildx build --push \
+        --platform=linux/arm64,linux/amd64 \
+        --build-arg GITHUB_ACTOR="${GITHUB_ACTOR}" \
+        --secret id=github_token,env=GITHUB_TOKEN \
+        -f Dockerfile.java \
+        -t {{ ecr_registry }}/{{ ecr_repo_prefix }}/java:{{ tag }} .
