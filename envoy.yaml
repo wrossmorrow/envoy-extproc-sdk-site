@@ -34,6 +34,25 @@ static_resources:
                 route_config:
                   name: local_route
                   virtual_hosts:
+                    - name: canonical_redirect
+                      domains:
+                        - "envoy-extproc-sdk.com"
+                        - "envoy-extproc-sdk.com:*"
+                        - "envoy-extproc-sdk.org"
+                        - "envoy-extproc-sdk.org:*"
+                        - "envoy-extproc-sdk.dev"
+                        - "envoy-extproc-sdk.dev:*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          redirect:
+                            host_redirect: "envoy-extproc-sdk.app"
+                            https_redirect: true
+                            response_code: MOVED_PERMANENTLY
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              disabled: true
                     - name: upstream
                       domains: ["*"]
                       routes:
