@@ -483,3 +483,96 @@ func TestSessionController_ResolveConflict(t *testing.T) {
 		t.Fatalf("SessionInFlight() = %v, %v; want true, nil after conflict", inFlight, err)
 	}
 }
+
+func TestSessionController_ReconnectAndReplayInFlightPhase(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	defer c.removeSession(s.ID)
+
+	// Simulate first stream disconnecting; session must remain alive.
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- c.GetUpdates(ctx1, s.ID, func(u *v1.CreateSessionResponse) error { return nil })
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel1()
+	<-done1
+
+	if _, err := c.GetSession(s.ID); err != nil {
+		t.Fatalf("GetSession() after stream disconnect = %v, want session preserved", err)
+	}
+
+	// Pause a phase, then reconnect via GetOrCreateSession + initialUpdateFor.
+	if err := c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v", err)
+	}
+	snap := &v1.HttpSnapshot{Headers: []*v1.Header{{Key: ":method", Value: "POST"}}}
+	if err := c.SendUpdate(s.ID, &v1.CreateSessionResponse{
+		SessionId: s.ID,
+		Phase:     v1.Phase_PHASE_REQUEST_HEADERS,
+		Snapshot:  snap,
+	}); err != nil {
+		t.Fatalf("SendUpdate() error = %v", err)
+	}
+
+	resumed, ok, err := c.GetOrCreateSession(s.ID)
+	if err != nil || !ok || resumed.ID != s.ID {
+		t.Fatalf("GetOrCreateSession(%q) = (%v, %v, %v), want existing session", s.ID, resumed, ok, err)
+	}
+	initial, err := c.initialUpdateFor(s.ID)
+	if err != nil {
+		t.Fatalf("initialUpdateFor() error = %v", err)
+	}
+	if initial.GetPhase() != v1.Phase_PHASE_REQUEST_HEADERS || initial.GetSnapshot() == nil {
+		t.Fatalf("initialUpdateFor() = %+v, want replayed REQUEST_HEADERS snapshot", initial)
+	}
+
+	if _, _, err := c.GetOrCreateSession("does-not-exist"); err != errSessionNotFound {
+		t.Fatalf("GetOrCreateSession(missing) error = %v, want %v", err, errSessionNotFound)
+	}
+}
+
+func TestSessionController_CancelSession_UnblocksInFlightAndDropsSession(t *testing.T) {
+	c := NewSessionController()
+	before := demoControllerGaugeValue(t, "demo_controller_sessions_active")
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	if err := c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v", err)
+	}
+
+	decisionCh := make(chan *v1.ProcessResponse, 1)
+	decisionErrCh := make(chan error, 1)
+	go func() {
+		dec, decErr := c.ResolveDecision(context.Background(), s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS))
+		decisionCh <- dec
+		decisionErrCh <- decErr
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	if err := c.CancelSession(s.ID); err != nil {
+		t.Fatalf("CancelSession() error = %v, want nil", err)
+	}
+	if err := <-decisionErrCh; err != nil {
+		t.Fatalf("ResolveDecision() after CancelSession error = %v, want nil", err)
+	}
+	dec := <-decisionCh
+	if dec.GetDecision().GetCancel() == nil {
+		t.Fatalf("ResolveDecision() after CancelSession = %+v, want cancel decision", dec)
+	}
+	if _, err := c.GetSession(s.ID); err != errSessionNotFound {
+		t.Fatalf("GetSession() after CancelSession = %v, want %v", err, errSessionNotFound)
+	}
+	if got := demoControllerGaugeValue(t, "demo_controller_sessions_active"); got != before {
+		t.Fatalf("demo_controller_sessions_active = %v, want %v", got, before)
+	}
+	if err := c.CancelSession(s.ID); err != errSessionNotFound {
+		t.Fatalf("second CancelSession() error = %v, want %v", err, errSessionNotFound)
+	}
+}

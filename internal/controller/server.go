@@ -36,10 +36,14 @@ type Session struct {
 	Status        SessionStatus
 	Phase         int32
 	Pending       *pendingDecision
+	LastSnapshot  *v1.HttpSnapshot
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 	PhaseDeadline time.Time
 	Updates       chan *Update
+
+	streamCancel context.CancelFunc
+	expireTimer  *time.Timer
 }
 
 type pendingDecision struct {
@@ -98,6 +102,16 @@ func NewSessionController() *SessionController {
 	return &SessionController{sessions: map[string]*Session{}}
 }
 
+func (c *SessionController) GetSession(id string) (*Session, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[id]
+	if !ok {
+		return nil, errSessionNotFound
+	}
+	return s, nil
+}
+
 func (c *SessionController) CreateSession() (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -110,32 +124,86 @@ func (c *SessionController) CreateSession() (*Session, error) {
 		ExpiresAt:     time.Now().Add(SessionTTL),
 		PhaseDeadline: time.Now().Add(PhaseTimeout),
 	}
+	s.expireTimer = time.AfterFunc(SessionTTL, func() {
+		c.removeSession(s.ID)
+	})
 	c.sessions[s.ID] = s
 	return s, nil
 }
 
-func (c *SessionController) GetSession(id string) (*Session, error) {
+// GetOrCreateSession returns an existing non-expired session when sessionID is
+// non-empty, or creates a fresh session when sessionID is empty. Returns
+// errSessionNotFound if sessionID is non-empty and unknown or expired.
+func (c *SessionController) GetOrCreateSession(sessionID string) (*Session, bool, error) {
+	if sessionID == "" {
+		s, err := c.CreateSession()
+		return s, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.sessions[sessionID]
+	if !ok {
+		return nil, false, errSessionNotFound
+	}
+	if time.Now().After(s.ExpiresAt) {
+		c.removeSessionLocked(sessionID)
+		return nil, false, errSessionNotFound
+	}
+	return s, true, nil
+}
+
+// initialUpdateFor builds the first CreateSessionResponse for a newly opened or
+// resumed CreateSession stream, replaying the currently paused phase if the
+// session is in flight.
+func (c *SessionController) initialUpdateFor(id string) (*v1.CreateSessionResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s, ok := c.sessions[id]
 	if !ok {
 		return nil, errSessionNotFound
 	}
-	return s, nil
+	if s.Status == SessionStatusInFlight {
+		return &v1.CreateSessionResponse{
+			SessionId: s.ID,
+			Phase:     v1.Phase(s.Phase),
+			Snapshot:  s.LastSnapshot,
+			Deadline:  timestamppb.New(s.PhaseDeadline),
+		}, nil
+	}
+	return &v1.CreateSessionResponse{
+		SessionId: s.ID,
+		Phase:     v1.Phase_PHASE_UNSPECIFIED,
+		Deadline:  timestamppb.New(s.PhaseDeadline),
+	}, nil
 }
 
 // GetUpdates streams phase updates for a session to a client with an open
-// updates stream. It returns when the client goes away (ctx cancelled), when
-// the session expires, or when the updates stream closes. On return the
-// session is dropped from the controller so it cannot leak.
+// updates stream. A newer GetUpdates call for the same session supersedes the
+// previous stream without deleting the session, so clients can reconnect across
+// transport drops. The session is only removed by CancelSession or expiration.
 func (c *SessionController) GetUpdates(ctx context.Context, id string, send func(*v1.CreateSessionResponse) error) error {
 	s, err := c.GetSession(id)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer func() { c.removeSession(id) }()
+
+	c.mu.Lock()
+	if cur, ok := c.sessions[id]; !ok {
+		c.mu.Unlock()
+		return errSessionNotFound
+	} else {
+		if cur.streamCancel != nil {
+			cur.streamCancel()
+		}
+		cur.streamCancel = cancel
+	}
+	c.mu.Unlock()
+
+	expireTimer := time.NewTimer(time.Until(s.ExpiresAt))
+	defer expireTimer.Stop()
+
 	for {
 		select {
 		case u, ok := <-s.Updates:
@@ -145,21 +213,54 @@ func (c *SessionController) GetUpdates(ctx context.Context, id string, send func
 			if err := send(u); err != nil {
 				return err
 			}
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Until(s.ExpiresAt)):
+		case <-streamCtx.Done():
+			return streamCtx.Err()
+		case <-expireTimer.C:
+			c.removeSession(id)
 			return errSessionTimedOut
 		}
 	}
 }
 
-// removeSession drops a session from the controller's session table once its
-// updates stream has ended.
+// CancelSession explicitly terminates an active session, unblocking any
+// in-flight phase decision and closing its updates stream.
+func (c *SessionController) CancelSession(id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.sessions[id]; !ok {
+		return errSessionNotFound
+	}
+	c.removeSessionLocked(id)
+	return nil
+}
+
+// removeSession drops a session from the controller's session table.
 func (c *SessionController) removeSession(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.removeSessionLocked(id)
+}
+
+func (c *SessionController) removeSessionLocked(id string) {
+	s, ok := c.sessions[id]
+	if !ok {
+		return
+	}
 	delete(c.sessions, id)
 	demoControllerSessionsActive.Dec()
+	if s.expireTimer != nil {
+		s.expireTimer.Stop()
+	}
+	if s.streamCancel != nil {
+		s.streamCancel()
+	}
+	if s.Status == SessionStatusInFlight && s.Pending != nil && s.Pending.Ch != nil {
+		select {
+		case s.Pending.Ch <- &pendingResolution{decision: &v1.Decision{Action: &v1.Decision_Cancel{Cancel: &v1.Cancel{Status: http.StatusServiceUnavailable, Headers: map[string]string{}}}}}:
+		default:
+		}
+		s.Status = SessionStatusResolved
+	}
 }
 
 func (c *SessionController) SubmitDecision(ctx context.Context, id string, phase int32, decision *v1.Decision) error {
@@ -298,13 +399,16 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 }
 
 // SendUpdate sends an update on the session's CreateSession stream to clients
-// with open streams for the session.
+// with open streams for the session, and records the snapshot for reconnects.
 func (c *SessionController) SendUpdate(id string, update *v1.CreateSessionResponse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s, ok := c.sessions[id]
 	if !ok {
 		return errSessionNotFound
+	}
+	if update.GetSnapshot() != nil {
+		s.LastSnapshot = update.GetSnapshot()
 	}
 	select {
 	case s.Updates <- update:
@@ -362,20 +466,27 @@ func NewDemoControllerHandler(controller *SessionController) (string, http.Handl
 	return v1connect.NewDemoControllerServiceHandler(&DemoControllerHandler{Controller: controller})
 }
 
-// CreateSession creates a new session and opens a stream of updates. The
-// first Update carries the session id with phase PHASE_UNSPECIFIED and the phase
-// decision deadline; the browser then sends the envoy-bound request carrying
+// CreateSession creates a new session (or resumes an existing one when
+// session_id is set) and opens a stream of updates. The first Update carries the
+// session id with phase PHASE_UNSPECIFIED (or the currently paused phase when
+// resuming mid-flight); the browser then sends the envoy-bound request carrying
 // that session id and receives phase updates as the session resolves.
 func (h *DemoControllerHandler) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest], stream *connect.ServerStream[v1.CreateSessionResponse]) error {
-	s, err := h.Controller.CreateSession()
+	s, _, err := h.Controller.GetOrCreateSession(req.Msg.GetSessionId())
 	if err != nil {
+		if errors.Is(err, errSessionNotFound) {
+			return connect.NewError(connect.CodeNotFound, err)
+		}
 		return err
 	}
-	if err := stream.Send(&v1.CreateSessionResponse{
-		SessionId: s.ID,
-		Phase:     v1.Phase_PHASE_UNSPECIFIED,
-		Deadline:  timestamppb.New(s.PhaseDeadline),
-	}); err != nil {
+	initial, err := h.Controller.initialUpdateFor(s.ID)
+	if err != nil {
+		if errors.Is(err, errSessionNotFound) {
+			return connect.NewError(connect.CodeNotFound, err)
+		}
+		return err
+	}
+	if err := stream.Send(initial); err != nil {
 		return err
 	}
 	return h.Controller.GetUpdates(ctx, s.ID, func(u *v1.CreateSessionResponse) error {
@@ -389,6 +500,17 @@ func (h *DemoControllerHandler) SubmitDecision(ctx context.Context, req *connect
 		return nil, err
 	}
 	return &connect.Response[v1.SubmitDecisionResponse]{}, nil
+}
+
+// CancelSession explicitly terminates an active session.
+func (h *DemoControllerHandler) CancelSession(ctx context.Context, req *connect.Request[v1.CancelSessionRequest]) (*connect.Response[v1.CancelSessionResponse], error) {
+	if err := h.Controller.CancelSession(req.Msg.GetSessionId()); err != nil {
+		if errors.Is(err, errSessionNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, err
+	}
+	return &connect.Response[v1.CancelSessionResponse]{}, nil
 }
 
 // newSessionID returns a new session id, a UUID version 7 (time-ordered) value.

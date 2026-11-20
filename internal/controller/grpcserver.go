@@ -21,19 +21,24 @@ type DemoControllerGRPCServer struct {
 	v1.UnimplementedDemoControllerServiceServer
 }
 
-// CreateSession opens a server-streaming RPC that sends session updates. The
-// first CreateSessionResponse carries the session id with phase PHASE_UNSPECIFIED
-// and the phase decision deadline.
+// CreateSession opens a server-streaming RPC that sends session updates (or
+// resumes an existing session when session_id is set).
 func (s *DemoControllerGRPCServer) CreateSession(req *v1.CreateSessionRequest, stream grpc.ServerStreamingServer[v1.CreateSessionResponse]) error {
-	sess, err := s.Controller.CreateSession()
+	sess, _, err := s.Controller.GetOrCreateSession(req.GetSessionId())
 	if err != nil {
+		if errors.Is(err, errSessionNotFound) {
+			return status.Error(codes.NotFound, err.Error())
+		}
 		return err
 	}
-	if err := stream.Send(&v1.CreateSessionResponse{
-		SessionId: sess.ID,
-		Phase:     v1.Phase_PHASE_UNSPECIFIED,
-		Deadline:  timestamppb.New(sess.PhaseDeadline),
-	}); err != nil {
+	initial, err := s.Controller.initialUpdateFor(sess.ID)
+	if err != nil {
+		if errors.Is(err, errSessionNotFound) {
+			return status.Error(codes.NotFound, err.Error())
+		}
+		return err
+	}
+	if err := stream.Send(initial); err != nil {
 		return err
 	}
 	return s.Controller.GetUpdates(stream.Context(), sess.ID, func(u *v1.CreateSessionResponse) error {
@@ -48,6 +53,17 @@ func (s *DemoControllerGRPCServer) SubmitDecision(ctx context.Context, req *v1.S
 		return nil, err
 	}
 	return &v1.SubmitDecisionResponse{}, nil
+}
+
+// CancelSession explicitly terminates an active session.
+func (s *DemoControllerGRPCServer) CancelSession(ctx context.Context, req *v1.CancelSessionRequest) (*v1.CancelSessionResponse, error) {
+	if err := s.Controller.CancelSession(req.GetSessionId()); err != nil {
+		if errors.Is(err, errSessionNotFound) {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		return nil, err
+	}
+	return &v1.CancelSessionResponse{}, nil
 }
 
 // DemoProcessorGRPCServer implements the DemoProcessorService gRPC service. It is
