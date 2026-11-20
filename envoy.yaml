@@ -23,9 +23,91 @@ static_resources:
                     - name: upstream
                       domains: ["*"]
                       routes:
-                        # Draft: route to the Rust demo extproc when the request
-                        # carries `x-demo-target-lang: rust`. Requests without the
-                        # header (or with any other value) fall through to the
+
+                        # Connect HTTP RPCs and long-lived server-streaming
+                        # (CreateSession / SubmitDecision) -> controller:9092,
+                        # bypassing ext_proc so streaming frames are not buffered.
+                        - name: controller-connect
+                          match:
+                            prefix: "/controller.v1.DemoControllerService/"
+                          route:
+                            cluster: controller-http
+                            timeout: 0s
+                            idle_timeout: 0s
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              disabled: true
+
+                        # Browser UI static assets -> web:8000, bypassing ext_proc.
+                        - name: web-assets
+                          match:
+                            safe_regex:
+                              regex: "^/(index\\.html|style\\.css|app\\.js|favicon\\.ico)$"
+                            headers:
+                              - name: "x-demo-session-id"
+                                present_match: false
+                          route:
+                            cluster: web
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              disabled: true
+
+                        # Browser document load on "/" -> web:8000, bypassing ext_proc.
+                        # Direct API calls (POST /, curl GET /, or requests with
+                        # x-demo-session-id) fall through to upstream + ext_proc below.
+                        - name: web-root
+                          match:
+                            path: "/"
+                            headers:
+                              - name: ":method"
+                                string_match:
+                                  exact: "GET"
+                              - name: "accept"
+                                string_match:
+                                  contains: "text/html"
+                              - name: "x-demo-session-id"
+                                present_match: false
+                          route:
+                            cluster: web
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              disabled: true
+
+                        # Route to the go demo extproc when the request carries
+                        # `x-demo-target-lang: go`. Requests without the header (or
+                        # with any other value) fall through to the default route
+                        # below, which uses the Go demo extproc.
+                        - name: extproc-go
+                          match:
+                            prefix: "/"
+                            headers:
+                              - name: x-demo-target-lang
+                                string_match:
+                                  exact: go
+                          route:
+                            cluster: upstream
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              overrides:
+                                grpc_service:
+                                  envoy_grpc:
+                                    cluster_name: extproc
+                                failure_mode_allow: false
+                                processing_mode:
+                                  request_header_mode: SEND
+                                  response_header_mode: SEND
+                                  request_body_mode: BUFFERED
+                                  response_body_mode: BUFFERED
+                                  request_trailer_mode: SKIP
+                                  response_trailer_mode: SKIP
+
+                        # Direct API calls: route to the Rust demo extproc when the
+                        # request carries `x-demo-target-lang: rust`. Requests without
+                        # the header (or with any other value) fall through to the
                         # default route below, which uses the Go demo extproc.
                         - name: extproc-rust
                           match:
@@ -51,6 +133,7 @@ static_resources:
                                   response_body_mode: BUFFERED
                                   request_trailer_mode: SKIP
                                   response_trailer_mode: SKIP
+                        
                         # Route to the Java demo extproc when the request carries
                         # `x-demo-target-lang: java`. Requests without the header (or
                         # with any other value) fall through to the default route
@@ -79,12 +162,14 @@ static_resources:
                                   response_body_mode: BUFFERED
                                   request_trailer_mode: SKIP
                                   response_trailer_mode: SKIP
+                        
                         # Default demo target: no x-demo-target-lang header (or any
                         # language without a more specific route) -> golang extproc.
                         - match:
                             prefix: "/"
                           route:
                             cluster: upstream
+                    
                 http_filters:
                   - name: envoy.filters.http.ext_proc
                     typed_config:
@@ -121,6 +206,36 @@ static_resources:
                   socket_address:
                     address: upstream
                     port_value: 8000
+  - name: web
+    connect_timeout: 0.250s
+    type: LOGICAL_DNS
+    lb_policy: ROUND_ROBIN
+    dns_lookup_family: V4_ONLY
+    load_assignment:
+      cluster_name: web
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                hostname: web
+                address:
+                  socket_address:
+                    address: web
+                    port_value: 8000
+  - name: controller-http
+    connect_timeout: 0.250s
+    type: LOGICAL_DNS
+    lb_policy: ROUND_ROBIN
+    dns_lookup_family: V4_ONLY
+    load_assignment:
+      cluster_name: controller-http
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                hostname: controller
+                address:
+                  socket_address:
+                    address: controller
+                    port_value: 9092
   - name: controller
     dns_lookup_family: V4_ONLY
     lb_policy: ROUND_ROBIN

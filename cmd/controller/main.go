@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,27 +26,14 @@ const (
 	grpcAddr   = "0.0.0.0:9093"
 )
 
-// envoyAddr is the upstream Envoy instance relaying envoy-bound demo
-// requests proxied through the demo web frontend.
-var envoyAddr = envOr("ENVOY_ADDR", "localhost:8081")
-
-// envOr returns the value of the environment variable named key, or fallback if unset.
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 // newMux builds the http.Handler for the demo controller service: the
-// human-facing Connect API and an envoy reverse proxy for envoy-bound demo
-// requests. The interactive demo static frontend is served by the standalone
-// web asset server (cmd/web), not here. Browser-facing endpoints answer CORS
-// preflights so the standalone web origin can drive the controller cross-origin.
+// human-facing Connect API, healthz, and Prometheus metrics. The interactive
+// demo static frontend is served by cmd/web, and Envoy fronts all browser and
+// demo traffic on a single origin.
 func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
 	controllerPath, controllerHandler := v1connect.NewDemoControllerServiceHandler(&controller.DemoControllerHandler{Controller: sessCtrl})
-	mux.Handle(controllerPath, corsHandler(controllerHandler))
+	mux.Handle(controllerPath, controllerHandler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -55,42 +41,7 @@ func newMux(sessCtrl *controller.SessionController) (*http.ServeMux, string) {
 		handler := promhttp.HandlerFor(controller.MetricsRegistry(), promhttp.HandlerOpts{EnableOpenMetrics: true})
 		handler.ServeHTTP(w, r)
 	})
-	envoyProxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = "http"
-			req.URL.Host = envoyAddr
-			req.URL.Path = "/"
-		},
-	}
-	mux.Handle("/envoy/", corsHandler(envoyProxy))
 	return mux, controllerPath
-}
-
-// writeCorsPreflight answers an CORS preflight (OPTIONS) for the controller's
-// browser-facing endpoints with the headers the interactive demo frontend needs
-// to send cross-origin requests (Connect streaming, envoy-bound demo requests
-// with custom headers and JSON content types).
-func writeCorsPreflight(w http.ResponseWriter, r *http.Request) {
-	h := w.Header()
-	h.Set("Access-Control-Allow-Origin", "*")
-	h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Content-Type, Connect-Protocol-Version, X-Http-Method-Override, X-Request-Id, X-Demo-Session-Id, X-Demo-Target-Lang, Authorization")
-	h.Set("Access-Control-Max-Age", "86400")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// corsHandler wraps a browser-facing controller handler: it answers CORS
-// preflights (OPTIONS) and attaches the CORS headers to actual responses, so
-// the standalone web origin can drive the controller cross-origin.
-func corsHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			writeCorsPreflight(w, r)
-			return
-		}
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func main() {
