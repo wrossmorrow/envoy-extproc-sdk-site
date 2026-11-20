@@ -16,6 +16,7 @@ private static final long serialVersionUID = 0L;
     super(builder);
   }
   private CreateSessionRequest() {
+    sessionId_ = "";
   }
 
   @java.lang.Override
@@ -43,6 +44,72 @@ private static final long serialVersionUID = 0L;
             com.controller.v1.CreateSessionRequest.class, com.controller.v1.CreateSessionRequest.Builder.class);
   }
 
+  private int bitField0_;
+  public static final int SESSION_ID_FIELD_NUMBER = 1;
+  @SuppressWarnings("serial")
+  private volatile java.lang.Object sessionId_ = "";
+  /**
+   * <pre>
+   * Optional existing session_id to resume on reconnect. When empty/unset, a
+   * new session is created. When set to an unknown or expired session,
+   * CreateSession returns NotFound.
+   * </pre>
+   *
+   * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+   * @return Whether the sessionId field is set.
+   */
+  @java.lang.Override
+  public boolean hasSessionId() {
+    return ((bitField0_ & 0x00000001) != 0);
+  }
+  /**
+   * <pre>
+   * Optional existing session_id to resume on reconnect. When empty/unset, a
+   * new session is created. When set to an unknown or expired session,
+   * CreateSession returns NotFound.
+   * </pre>
+   *
+   * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+   * @return The sessionId.
+   */
+  @java.lang.Override
+  public java.lang.String getSessionId() {
+    java.lang.Object ref = sessionId_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      sessionId_ = s;
+      return s;
+    }
+  }
+  /**
+   * <pre>
+   * Optional existing session_id to resume on reconnect. When empty/unset, a
+   * new session is created. When set to an unknown or expired session,
+   * CreateSession returns NotFound.
+   * </pre>
+   *
+   * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+   * @return The bytes for sessionId.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getSessionIdBytes() {
+    java.lang.Object ref = sessionId_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      sessionId_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -57,6 +124,9 @@ private static final long serialVersionUID = 0L;
   @java.lang.Override
   public void writeTo(com.google.protobuf.CodedOutputStream output)
                       throws java.io.IOException {
+    if (((bitField0_ & 0x00000001) != 0)) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 1, sessionId_);
+    }
     getUnknownFields().writeTo(output);
   }
 
@@ -66,6 +136,9 @@ private static final long serialVersionUID = 0L;
     if (size != -1) return size;
 
     size = 0;
+    if (((bitField0_ & 0x00000001) != 0)) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, sessionId_);
+    }
     size += getUnknownFields().getSerializedSize();
     memoizedSize = size;
     return size;
@@ -81,6 +154,11 @@ private static final long serialVersionUID = 0L;
     }
     com.controller.v1.CreateSessionRequest other = (com.controller.v1.CreateSessionRequest) obj;
 
+    if (hasSessionId() != other.hasSessionId()) return false;
+    if (hasSessionId()) {
+      if (!getSessionId()
+          .equals(other.getSessionId())) return false;
+    }
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -92,6 +170,10 @@ private static final long serialVersionUID = 0L;
     }
     int hash = 41;
     hash = (19 * hash) + getDescriptor().hashCode();
+    if (hasSessionId()) {
+      hash = (37 * hash) + SESSION_ID_FIELD_NUMBER;
+      hash = (53 * hash) + getSessionId().hashCode();
+    }
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -220,6 +302,8 @@ private static final long serialVersionUID = 0L;
     @java.lang.Override
     public Builder clear() {
       super.clear();
+      bitField0_ = 0;
+      sessionId_ = "";
       return this;
     }
 
@@ -246,8 +330,19 @@ private static final long serialVersionUID = 0L;
     @java.lang.Override
     public com.controller.v1.CreateSessionRequest buildPartial() {
       com.controller.v1.CreateSessionRequest result = new com.controller.v1.CreateSessionRequest(this);
+      if (bitField0_ != 0) { buildPartial0(result); }
       onBuilt();
       return result;
+    }
+
+    private void buildPartial0(com.controller.v1.CreateSessionRequest result) {
+      int from_bitField0_ = bitField0_;
+      int to_bitField0_ = 0;
+      if (((from_bitField0_ & 0x00000001) != 0)) {
+        result.sessionId_ = sessionId_;
+        to_bitField0_ |= 0x00000001;
+      }
+      result.bitField0_ |= to_bitField0_;
     }
 
     @java.lang.Override
@@ -294,6 +389,11 @@ private static final long serialVersionUID = 0L;
 
     public Builder mergeFrom(com.controller.v1.CreateSessionRequest other) {
       if (other == com.controller.v1.CreateSessionRequest.getDefaultInstance()) return this;
+      if (other.hasSessionId()) {
+        sessionId_ = other.sessionId_;
+        bitField0_ |= 0x00000001;
+        onChanged();
+      }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
       return this;
@@ -320,6 +420,11 @@ private static final long serialVersionUID = 0L;
             case 0:
               done = true;
               break;
+            case 10: {
+              sessionId_ = input.readStringRequireUtf8();
+              bitField0_ |= 0x00000001;
+              break;
+            } // case 10
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -333,6 +438,122 @@ private static final long serialVersionUID = 0L;
       } finally {
         onChanged();
       } // finally
+      return this;
+    }
+    private int bitField0_;
+
+    private java.lang.Object sessionId_ = "";
+    /**
+     * <pre>
+     * Optional existing session_id to resume on reconnect. When empty/unset, a
+     * new session is created. When set to an unknown or expired session,
+     * CreateSession returns NotFound.
+     * </pre>
+     *
+     * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+     * @return Whether the sessionId field is set.
+     */
+    public boolean hasSessionId() {
+      return ((bitField0_ & 0x00000001) != 0);
+    }
+    /**
+     * <pre>
+     * Optional existing session_id to resume on reconnect. When empty/unset, a
+     * new session is created. When set to an unknown or expired session,
+     * CreateSession returns NotFound.
+     * </pre>
+     *
+     * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+     * @return The sessionId.
+     */
+    public java.lang.String getSessionId() {
+      java.lang.Object ref = sessionId_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        sessionId_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <pre>
+     * Optional existing session_id to resume on reconnect. When empty/unset, a
+     * new session is created. When set to an unknown or expired session,
+     * CreateSession returns NotFound.
+     * </pre>
+     *
+     * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+     * @return The bytes for sessionId.
+     */
+    public com.google.protobuf.ByteString
+        getSessionIdBytes() {
+      java.lang.Object ref = sessionId_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        sessionId_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <pre>
+     * Optional existing session_id to resume on reconnect. When empty/unset, a
+     * new session is created. When set to an unknown or expired session,
+     * CreateSession returns NotFound.
+     * </pre>
+     *
+     * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+     * @param value The sessionId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSessionId(
+        java.lang.String value) {
+      if (value == null) { throw new NullPointerException(); }
+      sessionId_ = value;
+      bitField0_ |= 0x00000001;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * Optional existing session_id to resume on reconnect. When empty/unset, a
+     * new session is created. When set to an unknown or expired session,
+     * CreateSession returns NotFound.
+     * </pre>
+     *
+     * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearSessionId() {
+      sessionId_ = getDefaultInstance().getSessionId();
+      bitField0_ = (bitField0_ & ~0x00000001);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * Optional existing session_id to resume on reconnect. When empty/unset, a
+     * new session is created. When set to an unknown or expired session,
+     * CreateSession returns NotFound.
+     * </pre>
+     *
+     * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+     * @param value The bytes for sessionId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSessionIdBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) { throw new NullPointerException(); }
+      checkByteStringIsUtf8(value);
+      sessionId_ = value;
+      bitField0_ |= 0x00000001;
+      onChanged();
       return this;
     }
     @java.lang.Override

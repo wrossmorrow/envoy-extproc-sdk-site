@@ -80,6 +80,37 @@ public final class DemoControllerServiceGrpc {
     return getSubmitDecisionMethod;
   }
 
+  private static volatile io.grpc.MethodDescriptor<com.controller.v1.CancelSessionRequest,
+      com.controller.v1.CancelSessionResponse> getCancelSessionMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "CancelSession",
+      requestType = com.controller.v1.CancelSessionRequest.class,
+      responseType = com.controller.v1.CancelSessionResponse.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.controller.v1.CancelSessionRequest,
+      com.controller.v1.CancelSessionResponse> getCancelSessionMethod() {
+    io.grpc.MethodDescriptor<com.controller.v1.CancelSessionRequest, com.controller.v1.CancelSessionResponse> getCancelSessionMethod;
+    if ((getCancelSessionMethod = DemoControllerServiceGrpc.getCancelSessionMethod) == null) {
+      synchronized (DemoControllerServiceGrpc.class) {
+        if ((getCancelSessionMethod = DemoControllerServiceGrpc.getCancelSessionMethod) == null) {
+          DemoControllerServiceGrpc.getCancelSessionMethod = getCancelSessionMethod =
+              io.grpc.MethodDescriptor.<com.controller.v1.CancelSessionRequest, com.controller.v1.CancelSessionResponse>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "CancelSession"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.controller.v1.CancelSessionRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.controller.v1.CancelSessionResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new DemoControllerServiceMethodDescriptorSupplier("CancelSession"))
+              .build();
+        }
+      }
+    }
+    return getCancelSessionMethod;
+  }
+
   /**
    * Creates a new async stub that supports all call types for the service
    */
@@ -133,10 +164,10 @@ public final class DemoControllerServiceGrpc {
 
     /**
      * <pre>
-     * CreateSession creates a new session and opens a stream of updates. The
-     * first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-     * then sends the envoy-bound request carrying that session id and receives
-     * phase updates as the session resolves.
+     * CreateSession creates a new session (or resumes an existing one when
+     * session_id is set and still active) and opens a stream of updates. The
+     * first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+     * currently paused phase/snapshot/deadline when resuming mid-flight).
      * </pre>
      */
     default void createSession(com.controller.v1.CreateSessionRequest request,
@@ -152,6 +183,17 @@ public final class DemoControllerServiceGrpc {
     default void submitDecision(com.controller.v1.SubmitDecisionRequest request,
         io.grpc.stub.StreamObserver<com.controller.v1.SubmitDecisionResponse> responseObserver) {
       io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getSubmitDecisionMethod(), responseObserver);
+    }
+
+    /**
+     * <pre>
+     * CancelSession explicitly terminates an active session, failing closed any
+     * in-flight phase and releasing session state.
+     * </pre>
+     */
+    default void cancelSession(com.controller.v1.CancelSessionRequest request,
+        io.grpc.stub.StreamObserver<com.controller.v1.CancelSessionResponse> responseObserver) {
+      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getCancelSessionMethod(), responseObserver);
     }
   }
 
@@ -190,10 +232,10 @@ public final class DemoControllerServiceGrpc {
 
     /**
      * <pre>
-     * CreateSession creates a new session and opens a stream of updates. The
-     * first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-     * then sends the envoy-bound request carrying that session id and receives
-     * phase updates as the session resolves.
+     * CreateSession creates a new session (or resumes an existing one when
+     * session_id is set and still active) and opens a stream of updates. The
+     * first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+     * currently paused phase/snapshot/deadline when resuming mid-flight).
      * </pre>
      */
     public void createSession(com.controller.v1.CreateSessionRequest request,
@@ -211,6 +253,18 @@ public final class DemoControllerServiceGrpc {
         io.grpc.stub.StreamObserver<com.controller.v1.SubmitDecisionResponse> responseObserver) {
       io.grpc.stub.ClientCalls.asyncUnaryCall(
           getChannel().newCall(getSubmitDecisionMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     * <pre>
+     * CancelSession explicitly terminates an active session, failing closed any
+     * in-flight phase and releasing session state.
+     * </pre>
+     */
+    public void cancelSession(com.controller.v1.CancelSessionRequest request,
+        io.grpc.stub.StreamObserver<com.controller.v1.CancelSessionResponse> responseObserver) {
+      io.grpc.stub.ClientCalls.asyncUnaryCall(
+          getChannel().newCall(getCancelSessionMethod(), getCallOptions()), request, responseObserver);
     }
   }
 
@@ -235,10 +289,10 @@ public final class DemoControllerServiceGrpc {
 
     /**
      * <pre>
-     * CreateSession creates a new session and opens a stream of updates. The
-     * first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-     * then sends the envoy-bound request carrying that session id and receives
-     * phase updates as the session resolves.
+     * CreateSession creates a new session (or resumes an existing one when
+     * session_id is set and still active) and opens a stream of updates. The
+     * first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+     * currently paused phase/snapshot/deadline when resuming mid-flight).
      * </pre>
      */
     public java.util.Iterator<com.controller.v1.CreateSessionResponse> createSession(
@@ -255,6 +309,17 @@ public final class DemoControllerServiceGrpc {
     public com.controller.v1.SubmitDecisionResponse submitDecision(com.controller.v1.SubmitDecisionRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
           getChannel(), getSubmitDecisionMethod(), getCallOptions(), request);
+    }
+
+    /**
+     * <pre>
+     * CancelSession explicitly terminates an active session, failing closed any
+     * in-flight phase and releasing session state.
+     * </pre>
+     */
+    public com.controller.v1.CancelSessionResponse cancelSession(com.controller.v1.CancelSessionRequest request) {
+      return io.grpc.stub.ClientCalls.blockingUnaryCall(
+          getChannel(), getCancelSessionMethod(), getCallOptions(), request);
     }
   }
 
@@ -287,10 +352,23 @@ public final class DemoControllerServiceGrpc {
       return io.grpc.stub.ClientCalls.futureUnaryCall(
           getChannel().newCall(getSubmitDecisionMethod(), getCallOptions()), request);
     }
+
+    /**
+     * <pre>
+     * CancelSession explicitly terminates an active session, failing closed any
+     * in-flight phase and releasing session state.
+     * </pre>
+     */
+    public com.google.common.util.concurrent.ListenableFuture<com.controller.v1.CancelSessionResponse> cancelSession(
+        com.controller.v1.CancelSessionRequest request) {
+      return io.grpc.stub.ClientCalls.futureUnaryCall(
+          getChannel().newCall(getCancelSessionMethod(), getCallOptions()), request);
+    }
   }
 
   private static final int METHODID_CREATE_SESSION = 0;
   private static final int METHODID_SUBMIT_DECISION = 1;
+  private static final int METHODID_CANCEL_SESSION = 2;
 
   private static final class MethodHandlers<Req, Resp> implements
       io.grpc.stub.ServerCalls.UnaryMethod<Req, Resp>,
@@ -316,6 +394,10 @@ public final class DemoControllerServiceGrpc {
         case METHODID_SUBMIT_DECISION:
           serviceImpl.submitDecision((com.controller.v1.SubmitDecisionRequest) request,
               (io.grpc.stub.StreamObserver<com.controller.v1.SubmitDecisionResponse>) responseObserver);
+          break;
+        case METHODID_CANCEL_SESSION:
+          serviceImpl.cancelSession((com.controller.v1.CancelSessionRequest) request,
+              (io.grpc.stub.StreamObserver<com.controller.v1.CancelSessionResponse>) responseObserver);
           break;
         default:
           throw new AssertionError();
@@ -349,6 +431,13 @@ public final class DemoControllerServiceGrpc {
               com.controller.v1.SubmitDecisionRequest,
               com.controller.v1.SubmitDecisionResponse>(
                 service, METHODID_SUBMIT_DECISION)))
+        .addMethod(
+          getCancelSessionMethod(),
+          io.grpc.stub.ServerCalls.asyncUnaryCall(
+            new MethodHandlers<
+              com.controller.v1.CancelSessionRequest,
+              com.controller.v1.CancelSessionResponse>(
+                service, METHODID_CANCEL_SESSION)))
         .build();
   }
 
@@ -399,6 +488,7 @@ public final class DemoControllerServiceGrpc {
               .setSchemaDescriptor(new DemoControllerServiceFileDescriptorSupplier())
               .addMethod(getCreateSessionMethod())
               .addMethod(getSubmitDecisionMethod())
+              .addMethod(getCancelSessionMethod())
               .build();
         }
       }

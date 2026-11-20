@@ -103,6 +103,9 @@ const state = {
   sessionId: null,
   sessionState: "connecting", // connecting | live | ended | error
   sessionAbort: null,
+  requestAbort: null,
+  reconnectTimer: null,
+  reconnectAttempt: 0,
   requestInFlight: false,
   phase: null, // phase currently paused, or null
   phaseStartedAt: 0,
@@ -196,7 +199,7 @@ async function* readConnectStream(res) {
   }
 }
 
-async function unary(method, payload) {
+async function unary(method, payload, { keepalive = false } = {}) {
   const res = await fetch(CONTROLLER_BASE + "/" + method, {
     method: "POST",
     headers: {
@@ -204,24 +207,62 @@ async function unary(method, payload) {
       "Connect-Protocol-Version": CONNECT_PROTOCOL_VERSION,
     },
     body: JSON.stringify(payload),
+    keepalive,
   });
   if (!res.ok) throw await connectError(res);
   return res.json();
 }
 
+function cancelSession(sessionId, { keepalive = false } = {}) {
+  if (!sessionId) return Promise.resolve();
+  return unary("CancelSession", { sessionId }, { keepalive }).catch(() => {});
+}
+
 // ---------------------------------------------------------------------------
 // Session
 
-async function startSession() {
+function clearReconnectTimer() {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect() {
+  if (!state.sessionId || state.reconnectTimer) return;
+  const delayMs = Math.min(5000, 500 * Math.pow(2, state.reconnectAttempt));
+  state.reconnectAttempt = Math.min(state.reconnectAttempt + 1, 4);
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    if (state.sessionId) startSession({ resume: true });
+  }, delayMs);
+}
+
+async function startSession({ resume = false } = {}) {
+  clearReconnectTimer();
   if (state.sessionAbort) state.sessionAbort.abort();
   const abort = new AbortController();
   state.sessionAbort = abort;
-  state.sessionId = null;
-  state.requestInFlight = false;
-  // The response can also beat the last decision's SubmitDecision reply.
-  if (state.pendingFinalize) state.pendingFinalize.finalize();
-  clearPause();
+
+  if (!resume) {
+    const previousId = state.sessionId;
+    if (state.requestAbort) {
+      state.requestAbort.abort();
+      state.requestAbort = null;
+    }
+    state.sessionId = null;
+    state.reconnectAttempt = 0;
+    state.requestInFlight = false;
+    // The response can also beat the last decision's SubmitDecision reply.
+    if (state.pendingFinalize) state.pendingFinalize.finalize();
+    clearPause();
+    resetSteps();
+    $("response").hidden = true;
+    if (previousId) cancelSession(previousId);
+  }
   setSession("connecting");
+
+  const reqPayload = resume && state.sessionId ? { sessionId: state.sessionId } : {};
 
   try {
     const res = await fetch(CONTROLLER_BASE + "/CreateSession", {
@@ -230,23 +271,44 @@ async function startSession() {
         "Content-Type": CONNECT_STREAM_CONTENT_TYPE,
         "Connect-Protocol-Version": CONNECT_PROTOCOL_VERSION,
       },
-      body: frameConnectMessage("{}"),
+      body: frameConnectMessage(JSON.stringify(reqPayload)),
       signal: abort.signal,
     });
-    if (!res.ok) throw await connectError(res);
+    if (!res.ok) {
+      const err = await connectError(res);
+      err.httpStatus = res.status;
+      throw err;
+    }
     for await (const update of readConnectStream(res)) {
       if (abort.signal.aborted) return;
+      state.reconnectAttempt = 0;
       handleUpdate(update);
     }
     if (!abort.signal.aborted) {
-      setSession("ended");
-      log("Session stream closed by the server.", "warn");
+      if (state.sessionId) {
+        log("Session stream closed; reconnecting…", "warn");
+        scheduleReconnect();
+      } else {
+        setSession("ended");
+        log("Session stream closed by the server.", "warn");
+      }
     }
   } catch (err) {
     if (abort.signal.aborted) return;
-    // A session that was live and then failed has ended; "error" means we never got one.
-    setSession(state.sessionId ? "ended" : "error");
-    log((state.sessionId ? "Session ended: " : "Couldn't start a session: ") + err.message + ".", "bad");
+    if (resume && err.httpStatus === 404) {
+      state.sessionId = null;
+      log("Previous session expired; starting a new session.", "warn");
+      await startSession({ resume: false });
+      return;
+    }
+    if (state.sessionId) {
+      setSession("connecting");
+      log("Session stream interrupted (" + err.message + "); reconnecting…", "warn");
+      scheduleReconnect();
+      return;
+    }
+    setSession("error");
+    log("Couldn't start a session: " + err.message + ".", "bad");
   }
 }
 
@@ -257,14 +319,20 @@ function setSession(sessionState) {
 }
 
 function handleUpdate(update) {
+  const phase = update.phase;
   if (!state.sessionId) {
     state.sessionId = update.sessionId;
     setSession("live");
     log("Session started.");
+    if (!phase || phase === PHASE_UNSPECIFIED) return;
+  } else if (!phase || phase === PHASE_UNSPECIFIED) {
+    if (state.sessionState !== "live") {
+      setSession("live");
+      log("Session reconnected.");
+    }
     return;
   }
-  const phase = update.phase;
-  if (!phase || phase === PHASE_UNSPECIFIED) return;
+  if (state.sessionState !== "live") setSession("live");
 
   // A new phase means the previous one was released, i.e. our decision landed
   // even if its SubmitDecision response hasn't arrived yet.
@@ -446,13 +514,32 @@ async function sendRequest() {
   renderComposer();
   log("Sent " + method + " " + path + " via the " + LANG_NAMES[state.lang] + " processor.");
 
+  const reqAbort = new AbortController();
+  state.requestAbort = reqAbort;
   const started = performance.now();
   let result;
   try {
-    const res = await fetch(ENVOY_BASE.replace(/\/+$/, "") + path, { method, headers, body });
+    const res = await fetch(ENVOY_BASE.replace(/\/+$/, "") + path, {
+      method,
+      headers,
+      body,
+      signal: reqAbort.signal,
+    });
     result = { status: res.status, headers: res.headers, body: await res.text() };
   } catch (err) {
+    if (reqAbort.signal.aborted) {
+      if (state.requestAbort === reqAbort) state.requestAbort = null;
+      state.requestInFlight = false;
+      renderComposer();
+      return;
+    }
     result = { status: 0, headers: new Headers(), body: String(err) };
+  }
+  if (state.requestAbort === reqAbort) state.requestAbort = null;
+  if (reqAbort.signal.aborted) {
+    state.requestInFlight = false;
+    renderComposer();
+    return;
   }
   const elapsed = Math.round(performance.now() - started);
 
@@ -829,12 +916,6 @@ function applyPreset(preset) {
 
 async function selectLang(lang) {
   const switching = lang !== state.lang;
-  if (switching && state.requestInFlight && state.phase && !state.deciding) {
-    // Abandon the in-flight exchange for the old backend by sending an automatic
-    // cancel decision for the current phase, then start a fresh session on the
-    // new backend.
-    await decide("cancel");
-  }
   state.lang = lang;
   for (const tab of document.querySelectorAll(".tabs [role=tab]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.lang === lang));
@@ -860,7 +941,10 @@ async function selectLang(lang) {
 // Wiring
 
 function bind() {
-  $("new-session").addEventListener("click", startSession);
+  $("new-session").addEventListener("click", () => startSession());
+  window.addEventListener("pagehide", () => {
+    if (state.sessionId) cancelSession(state.sessionId, { keepalive: true });
+  });
   $("session-label").addEventListener("click", copySessionId);
   $("send-request").addEventListener("click", sendRequest);
   $("btn-continue").addEventListener("click", () => decide("continue"));

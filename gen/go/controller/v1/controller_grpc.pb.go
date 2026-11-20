@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DemoControllerService_CreateSession_FullMethodName  = "/controller.v1.DemoControllerService/CreateSession"
 	DemoControllerService_SubmitDecision_FullMethodName = "/controller.v1.DemoControllerService/SubmitDecision"
+	DemoControllerService_CancelSession_FullMethodName  = "/controller.v1.DemoControllerService/CancelSession"
 )
 
 // DemoControllerServiceClient is the client API for DemoControllerService service.
@@ -29,13 +30,16 @@ const (
 //
 // DemoControllerService manages interactive extproc sessions for the demo site.
 type DemoControllerServiceClient interface {
-	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-	// then sends the envoy-bound request carrying that session id and receives
-	// phase updates as the session resolves.
+	// CreateSession creates a new session (or resumes an existing one when
+	// session_id is set and still active) and opens a stream of updates. The
+	// first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+	// currently paused phase/snapshot/deadline when resuming mid-flight).
 	CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CreateSessionResponse], error)
 	// SubmitDecision submits a human decision (continue/cancel) for a session at a phase.
 	SubmitDecision(ctx context.Context, in *SubmitDecisionRequest, opts ...grpc.CallOption) (*SubmitDecisionResponse, error)
+	// CancelSession explicitly terminates an active session, failing closed any
+	// in-flight phase and releasing session state.
+	CancelSession(ctx context.Context, in *CancelSessionRequest, opts ...grpc.CallOption) (*CancelSessionResponse, error)
 }
 
 type demoControllerServiceClient struct {
@@ -75,19 +79,32 @@ func (c *demoControllerServiceClient) SubmitDecision(ctx context.Context, in *Su
 	return out, nil
 }
 
+func (c *demoControllerServiceClient) CancelSession(ctx context.Context, in *CancelSessionRequest, opts ...grpc.CallOption) (*CancelSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelSessionResponse)
+	err := c.cc.Invoke(ctx, DemoControllerService_CancelSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DemoControllerServiceServer is the server API for DemoControllerService service.
 // All implementations must embed UnimplementedDemoControllerServiceServer
 // for forward compatibility.
 //
 // DemoControllerService manages interactive extproc sessions for the demo site.
 type DemoControllerServiceServer interface {
-	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-	// then sends the envoy-bound request carrying that session id and receives
-	// phase updates as the session resolves.
+	// CreateSession creates a new session (or resumes an existing one when
+	// session_id is set and still active) and opens a stream of updates. The
+	// first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+	// currently paused phase/snapshot/deadline when resuming mid-flight).
 	CreateSession(*CreateSessionRequest, grpc.ServerStreamingServer[CreateSessionResponse]) error
 	// SubmitDecision submits a human decision (continue/cancel) for a session at a phase.
 	SubmitDecision(context.Context, *SubmitDecisionRequest) (*SubmitDecisionResponse, error)
+	// CancelSession explicitly terminates an active session, failing closed any
+	// in-flight phase and releasing session state.
+	CancelSession(context.Context, *CancelSessionRequest) (*CancelSessionResponse, error)
 	mustEmbedUnimplementedDemoControllerServiceServer()
 }
 
@@ -103,6 +120,9 @@ func (UnimplementedDemoControllerServiceServer) CreateSession(*CreateSessionRequ
 }
 func (UnimplementedDemoControllerServiceServer) SubmitDecision(context.Context, *SubmitDecisionRequest) (*SubmitDecisionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitDecision not implemented")
+}
+func (UnimplementedDemoControllerServiceServer) CancelSession(context.Context, *CancelSessionRequest) (*CancelSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelSession not implemented")
 }
 func (UnimplementedDemoControllerServiceServer) mustEmbedUnimplementedDemoControllerServiceServer() {}
 func (UnimplementedDemoControllerServiceServer) testEmbeddedByValue()                               {}
@@ -154,6 +174,24 @@ func _DemoControllerService_SubmitDecision_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DemoControllerService_CancelSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DemoControllerServiceServer).CancelSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DemoControllerService_CancelSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DemoControllerServiceServer).CancelSession(ctx, req.(*CancelSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DemoControllerService_ServiceDesc is the grpc.ServiceDesc for DemoControllerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -164,6 +202,10 @@ var DemoControllerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitDecision",
 			Handler:    _DemoControllerService_SubmitDecision_Handler,
+		},
+		{
+			MethodName: "CancelSession",
+			Handler:    _DemoControllerService_CancelSession_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -20,6 +20,16 @@ public final class ControllerProto {
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_controller_v1_CreateSessionRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_controller_v1_CancelSessionRequest_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_controller_v1_CancelSessionRequest_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_controller_v1_CancelSessionResponse_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_controller_v1_CancelSessionResponse_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
     internal_static_controller_v1_CreateSessionResponse_descriptor;
   static final 
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
@@ -90,60 +100,66 @@ public final class ControllerProto {
     java.lang.String[] descriptorData = {
       "\n\036controller/v1/controller.proto\022\rcontro" +
       "ller.v1\032\037google/protobuf/timestamp.proto" +
-      "\"\026\n\024CreateSessionRequest\"\323\001\n\025CreateSessi" +
-      "onResponse\022\035\n\nsession_id\030\001 \001(\tR\tsessionI" +
-      "d\022*\n\005phase\030\002 \001(\0162\024.controller.v1.PhaseR\005" +
-      "phase\0227\n\010snapshot\030\003 \001(\0132\033.controller.v1." +
-      "HttpSnapshotR\010snapshot\0226\n\010deadline\030\004 \001(\013" +
-      "2\032.google.protobuf.TimestampR\010deadline\"\227" +
-      "\001\n\025SubmitDecisionRequest\022\035\n\nsession_id\030\001" +
-      " \001(\tR\tsessionId\022*\n\005phase\030\002 \001(\0162\024.control" +
-      "ler.v1.PhaseR\005phase\0223\n\010decision\030\003 \001(\0132\027." +
-      "controller.v1.DecisionR\010decision\"\030\n\026Subm" +
-      "itDecisionResponse\"\224\001\n\016ProcessRequest\022\035\n" +
-      "\nsession_id\030\001 \001(\tR\tsessionId\022*\n\005phase\030\002 " +
-      "\001(\0162\024.controller.v1.PhaseR\005phase\0227\n\010snap" +
-      "shot\030\003 \001(\0132\033.controller.v1.HttpSnapshotR" +
-      "\010snapshot\"\221\001\n\017ProcessResponse\022\035\n\nsession" +
-      "_id\030\001 \001(\tR\tsessionId\022*\n\005phase\030\002 \001(\0162\024.co" +
-      "ntroller.v1.PhaseR\005phase\0223\n\010decision\030\003 \001" +
-      "(\0132\027.controller.v1.DecisionR\010decision\"|\n" +
-      "\010Decision\0225\n\010continue\030\001 \001(\0132\027.controller" +
-      ".v1.ContinueH\000R\010continue\022/\n\006cancel\030\002 \001(\013" +
-      "2\025.controller.v1.CancelH\000R\006cancelB\010\n\006act" +
-      "ion\"\317\001\n\010Continue\022>\n\007headers\030\001 \003(\0132$.cont" +
-      "roller.v1.Continue.HeadersEntryR\007headers" +
-      "\022%\n\016remove_headers\030\002 \003(\tR\rremoveHeaders\022" +
-      "\027\n\004body\030\003 \001(\014H\000R\004body\210\001\001\032:\n\014HeadersEntry" +
-      "\022\020\n\003key\030\001 \001(\tR\003key\022\024\n\005value\030\002 \001(\tR\005value" +
-      ":\0028\001B\007\n\005_body\"0\n\006Header\022\020\n\003key\030\001 \001(\tR\003ke" +
-      "y\022\024\n\005value\030\002 \001(\tR\005value\"\222\001\n\014HttpSnapshot" +
-      "\022/\n\007headers\030\001 \003(\0132\025.controller.v1.Header" +
-      "R\007headers\022\022\n\004body\030\002 \001(\014R\004body\022%\n\016body_tr" +
-      "uncated\030\003 \001(\010R\rbodyTruncated\022\026\n\006status\030\004" +
-      " \001(\005R\006status\"\256\001\n\006Cancel\022\026\n\006status\030\001 \001(\005R" +
-      "\006status\022\022\n\004body\030\002 \001(\tR\004body\022<\n\007headers\030\003" +
-      " \003(\0132\".controller.v1.Cancel.HeadersEntry" +
-      "R\007headers\032:\n\014HeadersEntry\022\020\n\003key\030\001 \001(\tR\003" +
-      "key\022\024\n\005value\030\002 \001(\tR\005value:\0028\001*\277\001\n\005Phase\022" +
-      "\025\n\021PHASE_UNSPECIFIED\020\000\022\031\n\025PHASE_REQUEST_" +
-      "HEADERS\020\001\022\026\n\022PHASE_REQUEST_BODY\020\002\022\032\n\026PHA" +
-      "SE_REQUEST_TRAILERS\020\003\022\032\n\026PHASE_RESPONSE_" +
-      "HEADERS\020\004\022\027\n\023PHASE_RESPONSE_BODY\020\005\022\033\n\027PH" +
-      "ASE_RESPONSE_TRAILERS\020\0062\324\001\n\025DemoControll" +
-      "erService\022\\\n\rCreateSession\022#.controller." +
-      "v1.CreateSessionRequest\032$.controller.v1." +
-      "CreateSessionResponse0\001\022]\n\016SubmitDecisio" +
-      "n\022$.controller.v1.SubmitDecisionRequest\032" +
-      "%.controller.v1.SubmitDecisionResponse2d" +
-      "\n\024DemoProcessorService\022L\n\007Process\022\035.cont" +
-      "roller.v1.ProcessRequest\032\036.controller.v1" +
-      ".ProcessResponse(\0010\001B\312\001\n\021com.controller." +
-      "v1B\017ControllerProtoP\001ZOgithub.com/wrossm" +
-      "orrow/envoy-extproc-sdk-site/gen/go/cont" +
-      "roller/v1;controllerv1\242\002\003CXX\252\002\rControlle" +
-      "r.V1\312\002\rController\\V1\342\002\031Controller\\V1\\GPB" +
-      "Metadata\352\002\016Controller::V1b\006proto3"
+      "\"I\n\024CreateSessionRequest\022\"\n\nsession_id\030\001" +
+      " \001(\tH\000R\tsessionId\210\001\001B\r\n\013_session_id\"5\n\024C" +
+      "ancelSessionRequest\022\035\n\nsession_id\030\001 \001(\tR" +
+      "\tsessionId\"\027\n\025CancelSessionResponse\"\323\001\n\025" +
+      "CreateSessionResponse\022\035\n\nsession_id\030\001 \001(" +
+      "\tR\tsessionId\022*\n\005phase\030\002 \001(\0162\024.controller" +
+      ".v1.PhaseR\005phase\0227\n\010snapshot\030\003 \001(\0132\033.con" +
+      "troller.v1.HttpSnapshotR\010snapshot\0226\n\010dea" +
+      "dline\030\004 \001(\0132\032.google.protobuf.TimestampR" +
+      "\010deadline\"\227\001\n\025SubmitDecisionRequest\022\035\n\ns" +
+      "ession_id\030\001 \001(\tR\tsessionId\022*\n\005phase\030\002 \001(" +
+      "\0162\024.controller.v1.PhaseR\005phase\0223\n\010decisi" +
+      "on\030\003 \001(\0132\027.controller.v1.DecisionR\010decis" +
+      "ion\"\030\n\026SubmitDecisionResponse\"\224\001\n\016Proces" +
+      "sRequest\022\035\n\nsession_id\030\001 \001(\tR\tsessionId\022" +
+      "*\n\005phase\030\002 \001(\0162\024.controller.v1.PhaseR\005ph" +
+      "ase\0227\n\010snapshot\030\003 \001(\0132\033.controller.v1.Ht" +
+      "tpSnapshotR\010snapshot\"\221\001\n\017ProcessResponse" +
+      "\022\035\n\nsession_id\030\001 \001(\tR\tsessionId\022*\n\005phase" +
+      "\030\002 \001(\0162\024.controller.v1.PhaseR\005phase\0223\n\010d" +
+      "ecision\030\003 \001(\0132\027.controller.v1.DecisionR\010" +
+      "decision\"|\n\010Decision\0225\n\010continue\030\001 \001(\0132\027" +
+      ".controller.v1.ContinueH\000R\010continue\022/\n\006c" +
+      "ancel\030\002 \001(\0132\025.controller.v1.CancelH\000R\006ca" +
+      "ncelB\010\n\006action\"\317\001\n\010Continue\022>\n\007headers\030\001" +
+      " \003(\0132$.controller.v1.Continue.HeadersEnt" +
+      "ryR\007headers\022%\n\016remove_headers\030\002 \003(\tR\rrem" +
+      "oveHeaders\022\027\n\004body\030\003 \001(\014H\000R\004body\210\001\001\032:\n\014H" +
+      "eadersEntry\022\020\n\003key\030\001 \001(\tR\003key\022\024\n\005value\030\002" +
+      " \001(\tR\005value:\0028\001B\007\n\005_body\"0\n\006Header\022\020\n\003ke" +
+      "y\030\001 \001(\tR\003key\022\024\n\005value\030\002 \001(\tR\005value\"\222\001\n\014H" +
+      "ttpSnapshot\022/\n\007headers\030\001 \003(\0132\025.controlle" +
+      "r.v1.HeaderR\007headers\022\022\n\004body\030\002 \001(\014R\004body" +
+      "\022%\n\016body_truncated\030\003 \001(\010R\rbodyTruncated\022" +
+      "\026\n\006status\030\004 \001(\005R\006status\"\256\001\n\006Cancel\022\026\n\006st" +
+      "atus\030\001 \001(\005R\006status\022\022\n\004body\030\002 \001(\tR\004body\022<" +
+      "\n\007headers\030\003 \003(\0132\".controller.v1.Cancel.H" +
+      "eadersEntryR\007headers\032:\n\014HeadersEntry\022\020\n\003" +
+      "key\030\001 \001(\tR\003key\022\024\n\005value\030\002 \001(\tR\005value:\0028\001" +
+      "*\277\001\n\005Phase\022\025\n\021PHASE_UNSPECIFIED\020\000\022\031\n\025PHA" +
+      "SE_REQUEST_HEADERS\020\001\022\026\n\022PHASE_REQUEST_BO" +
+      "DY\020\002\022\032\n\026PHASE_REQUEST_TRAILERS\020\003\022\032\n\026PHAS" +
+      "E_RESPONSE_HEADERS\020\004\022\027\n\023PHASE_RESPONSE_B" +
+      "ODY\020\005\022\033\n\027PHASE_RESPONSE_TRAILERS\020\0062\260\002\n\025D" +
+      "emoControllerService\022\\\n\rCreateSession\022#." +
+      "controller.v1.CreateSessionRequest\032$.con" +
+      "troller.v1.CreateSessionResponse0\001\022]\n\016Su" +
+      "bmitDecision\022$.controller.v1.SubmitDecis" +
+      "ionRequest\032%.controller.v1.SubmitDecisio" +
+      "nResponse\022Z\n\rCancelSession\022#.controller." +
+      "v1.CancelSessionRequest\032$.controller.v1." +
+      "CancelSessionResponse2d\n\024DemoProcessorSe" +
+      "rvice\022L\n\007Process\022\035.controller.v1.Process" +
+      "Request\032\036.controller.v1.ProcessResponse(" +
+      "\0010\001B\312\001\n\021com.controller.v1B\017ControllerPro" +
+      "toP\001ZOgithub.com/wrossmorrow/envoy-extpr" +
+      "oc-sdk-site/gen/go/controller/v1;control" +
+      "lerv1\242\002\003CXX\252\002\rController.V1\312\002\rController" +
+      "\\V1\342\002\031Controller\\V1\\GPBMetadata\352\002\016Contro" +
+      "ller::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -155,45 +171,57 @@ public final class ControllerProto {
     internal_static_controller_v1_CreateSessionRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_CreateSessionRequest_descriptor,
+        new java.lang.String[] { "SessionId", "SessionId", });
+    internal_static_controller_v1_CancelSessionRequest_descriptor =
+      getDescriptor().getMessageTypes().get(1);
+    internal_static_controller_v1_CancelSessionRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        internal_static_controller_v1_CancelSessionRequest_descriptor,
+        new java.lang.String[] { "SessionId", });
+    internal_static_controller_v1_CancelSessionResponse_descriptor =
+      getDescriptor().getMessageTypes().get(2);
+    internal_static_controller_v1_CancelSessionResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        internal_static_controller_v1_CancelSessionResponse_descriptor,
         new java.lang.String[] { });
     internal_static_controller_v1_CreateSessionResponse_descriptor =
-      getDescriptor().getMessageTypes().get(1);
+      getDescriptor().getMessageTypes().get(3);
     internal_static_controller_v1_CreateSessionResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_CreateSessionResponse_descriptor,
         new java.lang.String[] { "SessionId", "Phase", "Snapshot", "Deadline", });
     internal_static_controller_v1_SubmitDecisionRequest_descriptor =
-      getDescriptor().getMessageTypes().get(2);
+      getDescriptor().getMessageTypes().get(4);
     internal_static_controller_v1_SubmitDecisionRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_SubmitDecisionRequest_descriptor,
         new java.lang.String[] { "SessionId", "Phase", "Decision", });
     internal_static_controller_v1_SubmitDecisionResponse_descriptor =
-      getDescriptor().getMessageTypes().get(3);
+      getDescriptor().getMessageTypes().get(5);
     internal_static_controller_v1_SubmitDecisionResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_SubmitDecisionResponse_descriptor,
         new java.lang.String[] { });
     internal_static_controller_v1_ProcessRequest_descriptor =
-      getDescriptor().getMessageTypes().get(4);
+      getDescriptor().getMessageTypes().get(6);
     internal_static_controller_v1_ProcessRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_ProcessRequest_descriptor,
         new java.lang.String[] { "SessionId", "Phase", "Snapshot", });
     internal_static_controller_v1_ProcessResponse_descriptor =
-      getDescriptor().getMessageTypes().get(5);
+      getDescriptor().getMessageTypes().get(7);
     internal_static_controller_v1_ProcessResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_ProcessResponse_descriptor,
         new java.lang.String[] { "SessionId", "Phase", "Decision", });
     internal_static_controller_v1_Decision_descriptor =
-      getDescriptor().getMessageTypes().get(6);
+      getDescriptor().getMessageTypes().get(8);
     internal_static_controller_v1_Decision_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_Decision_descriptor,
         new java.lang.String[] { "Continue", "Cancel", "Action", });
     internal_static_controller_v1_Continue_descriptor =
-      getDescriptor().getMessageTypes().get(7);
+      getDescriptor().getMessageTypes().get(9);
     internal_static_controller_v1_Continue_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_Continue_descriptor,
@@ -205,19 +233,19 @@ public final class ControllerProto {
         internal_static_controller_v1_Continue_HeadersEntry_descriptor,
         new java.lang.String[] { "Key", "Value", });
     internal_static_controller_v1_Header_descriptor =
-      getDescriptor().getMessageTypes().get(8);
+      getDescriptor().getMessageTypes().get(10);
     internal_static_controller_v1_Header_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_Header_descriptor,
         new java.lang.String[] { "Key", "Value", });
     internal_static_controller_v1_HttpSnapshot_descriptor =
-      getDescriptor().getMessageTypes().get(9);
+      getDescriptor().getMessageTypes().get(11);
     internal_static_controller_v1_HttpSnapshot_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_HttpSnapshot_descriptor,
         new java.lang.String[] { "Headers", "Body", "BodyTruncated", "Status", });
     internal_static_controller_v1_Cancel_descriptor =
-      getDescriptor().getMessageTypes().get(10);
+      getDescriptor().getMessageTypes().get(12);
     internal_static_controller_v1_Cancel_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_controller_v1_Cancel_descriptor,

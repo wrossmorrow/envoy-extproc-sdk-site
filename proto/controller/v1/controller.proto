@@ -6,14 +6,18 @@ import "google/protobuf/timestamp.proto";
 
 // DemoControllerService manages interactive extproc sessions for the demo site.
 service DemoControllerService {
-  // CreateSession creates a new session and opens a stream of updates. The
-  // first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-  // then sends the envoy-bound request carrying that session id and receives
-  // phase updates as the session resolves.
+  // CreateSession creates a new session (or resumes an existing one when
+  // session_id is set and still active) and opens a stream of updates. The
+  // first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+  // currently paused phase/snapshot/deadline when resuming mid-flight).
   rpc CreateSession(CreateSessionRequest) returns (stream CreateSessionResponse);
 
   // SubmitDecision submits a human decision (continue/cancel) for a session at a phase.
   rpc SubmitDecision(SubmitDecisionRequest) returns (SubmitDecisionResponse);
+
+  // CancelSession explicitly terminates an active session, failing closed any
+  // in-flight phase and releasing session state.
+  rpc CancelSession(CancelSessionRequest) returns (CancelSessionResponse);
 }
 
 // DemoProcessorService is the internal controller<->extproc channel service. It is
@@ -26,7 +30,18 @@ service DemoProcessorService {
   rpc Process(stream ProcessRequest) returns (stream ProcessResponse);
 }
 
-message CreateSessionRequest {}
+message CreateSessionRequest {
+  // Optional existing session_id to resume on reconnect. When empty/unset, a
+  // new session is created. When set to an unknown or expired session,
+  // CreateSession returns NotFound.
+  optional string session_id = 1;
+}
+
+message CancelSessionRequest {
+  string session_id = 1;
+}
+
+message CancelSessionResponse {}
 
 message CreateSessionResponse {
   string session_id = 1;

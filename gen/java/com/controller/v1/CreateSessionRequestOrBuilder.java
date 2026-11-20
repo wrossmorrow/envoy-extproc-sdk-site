@@ -6,4 +6,39 @@ package com.controller.v1;
 public interface CreateSessionRequestOrBuilder extends
     // @@protoc_insertion_point(interface_extends:controller.v1.CreateSessionRequest)
     com.google.protobuf.MessageOrBuilder {
+
+  /**
+   * <pre>
+   * Optional existing session_id to resume on reconnect. When empty/unset, a
+   * new session is created. When set to an unknown or expired session,
+   * CreateSession returns NotFound.
+   * </pre>
+   *
+   * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+   * @return Whether the sessionId field is set.
+   */
+  boolean hasSessionId();
+  /**
+   * <pre>
+   * Optional existing session_id to resume on reconnect. When empty/unset, a
+   * new session is created. When set to an unknown or expired session,
+   * CreateSession returns NotFound.
+   * </pre>
+   *
+   * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+   * @return The sessionId.
+   */
+  java.lang.String getSessionId();
+  /**
+   * <pre>
+   * Optional existing session_id to resume on reconnect. When empty/unset, a
+   * new session is created. When set to an unknown or expired session,
+   * CreateSession returns NotFound.
+   * </pre>
+   *
+   * <code>optional string session_id = 1 [json_name = "sessionId"];</code>
+   * @return The bytes for sessionId.
+   */
+  com.google.protobuf.ByteString
+      getSessionIdBytes();
 }
