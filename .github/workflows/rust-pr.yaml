@@ -1,0 +1,46 @@
+name: Rust PR Checks
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'gen/rust/**'
+      - 'Dockerfile.rust'
+      - '.github/workflows/rust-pr.yaml'
+  workflow_dispatch:
+
+jobs:
+  rust-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust/demo-extproc
+            rust/protoc-gen-tonic-prost
+      - name: Check formatting
+        run: |
+          cd rust/demo-extproc && cargo fmt --check
+          cd ../protoc-gen-tonic-prost && cargo fmt --check
+      - name: Run clippy
+        run: |
+          cd rust/demo-extproc && cargo clippy --all-targets -- -D warnings
+          cd ../protoc-gen-tonic-prost && cargo clippy --all-targets -- -D warnings
+      - name: Run tests
+        run: |
+          cd rust/demo-extproc && cargo test
+          cd ../protoc-gen-tonic-prost && cargo test
+
+  rust-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Check Rust image build
+        run: docker build -f Dockerfile.rust .

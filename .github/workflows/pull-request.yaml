@@ -3,6 +3,12 @@ on:
   pull_request:
     paths:
       - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'web/**'
+      - 'Dockerfile'
+      - '.github/workflows/pull-request.yaml'
+  workflow_dispatch:
 jobs:
   build-check:
     runs-on: ubuntu-latest
@@ -21,6 +27,7 @@ jobs:
         run: |
           docker build --build-arg CMD=controller .
           docker build --build-arg CMD=extproc .
+          docker build --build-arg CMD=web .
   vet-check:
     runs-on: ubuntu-latest
     steps:
@@ -47,3 +54,5 @@ jobs:
           cache-dependency-path: 'go.sum'
       - name: Unit tests
         run: go test -v -race ./...
+      - name: Web JS syntax check
+        run: node --check web/static/app.js

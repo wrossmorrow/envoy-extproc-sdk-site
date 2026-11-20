@@ -1,0 +1,43 @@
+name: Infra PR Checks
+on:
+  pull_request:
+    paths:
+      - 'envoy.yaml'
+      - 'compose.yaml'
+      - 'compose.prod.yaml'
+      - 'infra/terraform/**'
+      - '.github/workflows/infra-pr.yaml'
+  workflow_dispatch:
+
+jobs:
+  validate-envoy-and-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Validate envoy.yaml
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/envoy.yaml:/etc/envoy/envoy.yaml:ro" \
+            envoyproxy/envoy:v1.35-latest \
+            envoy --mode validate -c /etc/envoy/envoy.yaml
+      - name: Validate compose configs
+        env:
+          ECR_REGISTRY: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+          ECR_REPO_PREFIX: envoy-extproc-sdk-site
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.yaml -f compose.prod.yaml config --quiet
+
+  validate-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Check formatting and validate
+        run: |
+          terraform -chdir=infra/terraform fmt -check
+          terraform -chdir=infra/terraform init -backend=false
+          terraform -chdir=infra/terraform validate
