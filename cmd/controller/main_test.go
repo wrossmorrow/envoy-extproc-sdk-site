@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -52,6 +53,41 @@ func TestHandlerAnswersCorsPreflight(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET /missing-asset.txt status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+// TestCorsHandlerAnswersPreflightAndActualResponse asserts that the controller's
+// CORS handler answers preflights and attaches the CORS headers to actual
+// responses, so the standalone web origin can drive the controller cross-origin.
+func TestCorsHandlerAnswersPreflightAndActualResponse(t *testing.T) {
+	handler := corsHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+
+	preflight := httptest.NewRequest(http.MethodOptions, "/controller.v1.DemoControllerService/SubmitDecision", nil)
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	preflight.Header.Set("Access-Control-Request-Headers", "content-type")
+	preflightRec := httptest.NewRecorder()
+	handler.ServeHTTP(preflightRec, preflight)
+	if preflightRec.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want %d", preflightRec.Code, http.StatusNoContent)
+	}
+	if got := preflightRec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("preflight Access-Control-Allow-Origin = %q, want %q", got, "*")
+	}
+
+	actual := httptest.NewRequest(http.MethodPost, "/controller.v1.DemoControllerService/SubmitDecision", strings.NewReader(`{}`))
+	actual.Header.Set("Content-Type", "application/connect+json")
+	actual.Header.Set("Connect-Protocol-Version", "1")
+	actualRec := httptest.NewRecorder()
+	handler.ServeHTTP(actualRec, actual)
+	if actualRec.Code != http.StatusOK {
+		t.Fatalf("actual status = %d, want %d", actualRec.Code, http.StatusOK)
+	}
+	if got := actualRec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("actual Access-Control-Allow-Origin = %q, want %q", got, "*")
 	}
 }
 
