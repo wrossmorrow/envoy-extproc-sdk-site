@@ -284,3 +284,15 @@ pre {
 
 footer { display: flex; gap: 1rem; padding-bottom: 2rem; font-size: 0.8rem; }
 footer a { color: var(--text-2); }
+
+/* Guided experiments and response explanations */
+.experiments { margin: -0.25rem 0 0.85rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border); }
+.experiments .field-label { margin-top: 0; }
+.experiment-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+button.preset[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+.experiment-goal {
+  margin: 0.6rem 0 0; padding: 0.5rem 0.7rem; font-size: 0.85rem;
+  border-left: 3px solid var(--accent); background: var(--accent-bg); border-radius: 0 6px 6px 0;
+}
+.explain { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--text-2); }
+.explain[data-kind="bad"] { color: var(--text); border-left: 3px solid var(--bad); padding-left: 0.6rem; }

@@ -61,6 +61,43 @@ const PRESETS = [
   },
 ];
 
+// Mirrors per_connection_buffer_limit_bytes in envoy.yaml.
+const BODY_LIMIT_LABEL = "64 KiB";
+
+// Guided experiments: each loads a preset and states what to do and look for.
+const EXPERIMENTS = [
+  {
+    name: "Strip a header",
+    preset: 0,
+    goal: "At request headers, remove content-type, then continue each phase. The echoed response shows the upstream never received it.",
+  },
+  {
+    name: "Rewrite the body",
+    preset: 0,
+    goal: "At request body, change qty to 100 and continue. The upstream gets your edit, not what the browser sent.",
+  },
+  {
+    name: "Block before upstream",
+    preset: 0,
+    goal: "At request headers, reject with 403. Upstream never lights up: Envoy answers without contacting it.",
+  },
+  {
+    name: "Too late to stop it",
+    preset: 0,
+    goal: "Continue through the request phases, then reject at response headers. The upstream already handled the request; you only replace what the browser sees.",
+  },
+  {
+    name: "Fewer phases",
+    preset: 1,
+    goal: "Send this GET and watch the flow: with no request body, Envoy skips that phase entirely.",
+  },
+  {
+    name: "Let it time out",
+    preset: 0,
+    goal: "Send, then do nothing at the first pause. When the countdown runs out, the processor fails closed and Envoy returns an error.",
+  },
+];
+
 const state = {
   lang: "go",
   sessionId: null,
@@ -74,7 +111,9 @@ const state = {
   removeHeaders: new Set(), // header names marked for removal at this phase
   originalBody: null, // decoded snapshot body, to detect edits
   deciding: false,
-  pendingFinalize: null, // {phase, finalize} while a decision is in flight
+  pendingFinalize: null,
+  lastRejection: null, // {phase, status} when the visitor rejected this exchange
+  timedOutPhase: null, // phase that timed out in this exchange, if any // {phase, finalize} while a decision is in flight
   steps: {}, // pipeline step -> state
 };
 
@@ -304,6 +343,7 @@ async function decide(action) {
     if (finalized) return;
     finalized = true;
     setStep(phase, action === "continue" ? "passed" : "rejected");
+    if (action !== "continue") state.lastRejection = { phase, status: decision.cancel.status };
     if (action === "continue") setLane(phase, { up: "ok", upText: "↑ continue", proc: "replied", sub: "replied" });
     else setLane(phase, { up: "bad", upText: "↑ immediate " + decision.cancel.status, proc: "rejected", sub: "rejected" });
     log(summary + ".", action === "continue" ? "ok" : "bad");
@@ -354,6 +394,7 @@ function startCountdown() {
     if (remaining === 0 && state.phase) {
       setStep(state.phase, "rejected");
       setLane(state.phase, { up: "bad", upText: "↑ timeout", proc: "rejected", sub: "timed out" });
+      state.timedOutPhase = state.phase;
       log("Timed out at " + phaseLabel(state.phase) + "; the processor fails closed.", "bad");
       clearPause();
     }
@@ -397,6 +438,8 @@ async function sendRequest() {
   const body = method === "GET" ? undefined : $("req-body").value;
 
   state.requestInFlight = true;
+  state.lastRejection = null;
+  state.timedOutPhase = null;
   resetSteps();
   setStep("client", "done");
   $("response").hidden = true;
@@ -420,7 +463,11 @@ async function sendRequest() {
   const rejectedEarly = Object.entries(state.steps).some(([k, v]) => REQUEST_PHASES.has(k) && v === "rejected");
   if (!rejectedEarly && result.status > 0) setStep("upstream", "done");
   setStep("done", result.status >= 200 && result.status < 400 ? "done" : "rejected");
-  log("Response " + (result.status || "failed") + " after " + formatMs(elapsed) + ".", result.status >= 200 && result.status < 400 ? "ok" : "bad");
+  const explanation = explainResponse(result);
+  log(
+    "Response " + (result.status || "failed") + " after " + formatMs(elapsed) + "." + (explanation ? " " + explanation.short : ""),
+    result.status >= 200 && result.status < 400 ? "ok" : "bad",
+  );
   renderResponse(result, elapsed);
   renderComposer();
 }
@@ -562,10 +609,77 @@ function renderResponse(result, elapsed) {
   badge.textContent = result.status ? String(result.status) : "error";
   badge.dataset.kind = result.status >= 200 && result.status < 400 ? "ok" : "bad";
   $("response-meta").textContent = formatMs(elapsed);
+  const explain = $("response-explain");
+  const explanation = explainResponse(result);
+  explain.hidden = !explanation;
+  explain.textContent = explanation ? explanation.long : "";
+  explain.dataset.kind = result.status >= 200 && result.status < 400 ? "ok" : "bad";
   const lines = [];
   result.headers.forEach((v, k) => lines.push(k + ": " + v));
   $("response-headers").textContent = lines.join("\n") || "(none visible to the page)";
   $("response-body").textContent = prettyBody(result.body) || "(empty body)";
+}
+
+// explainResponse turns a status into a plain-language note, using what this
+// exchange did (a rejection, a timeout) to tell a demo outcome from a failure.
+function explainResponse(result) {
+  const status = result.status;
+  const rej = state.lastRejection;
+  if (rej && rej.status === status) {
+    if (REQUEST_PHASES.has(rej.phase)) {
+      return {
+        short: "You rejected it at " + phaseLabel(rej.phase) + ".",
+        long: "You rejected this at " + phaseLabel(rej.phase) + ". Envoy answered with your status and the upstream never saw the request.",
+      };
+    }
+    return {
+      short: "You rejected it at " + phaseLabel(rej.phase) + ".",
+      long: "You rejected this at " + phaseLabel(rej.phase) + ". The upstream had already handled the request; you replaced the response the browser got.",
+    };
+  }
+  if (state.timedOutPhase && status >= 500) {
+    return {
+      short: "A phase timed out.",
+      long: "Nobody decided " + phaseLabel(state.timedOutPhase) + " in time, so the processor failed closed and Envoy returned an error instead of forwarding the request.",
+    };
+  }
+  switch (status) {
+    case 0:
+      return {
+        short: "It never reached Envoy.",
+        long: "The request didn't reach Envoy: a network problem, or the browser blocked it. Check your connection and try again.",
+      };
+    case 409:
+      return {
+        short: "Another request is already paused.",
+        long: "This session already has a request paused. Each session holds one at a time: decide or reject that one first, or start a new session.",
+      };
+    case 413:
+      return {
+        short: "The body is too large.",
+        long: "The body is over the demo's " + BODY_LIMIT_LABEL + " limit. Envoy rejected it while buffering, before the processor ever saw it.",
+      };
+    case 429:
+      return {
+        short: "Rate limited.",
+        long: "Envoy's rate limiter turned this away before it reached the processor. Wait a moment and try again.",
+      };
+    case 400:
+    case 404:
+    case 410:
+      return {
+        short: "The session wasn't recognized.",
+        long: "The processor didn't recognize this session; it may have ended. Start a new session and try again.",
+      };
+    default:
+      if (status >= 500) {
+        return {
+          short: "The processor failed.",
+          long: "Something failed between Envoy, the processor and the controller, and Envoy failed closed. Starting a new session usually clears it.",
+        };
+      }
+      return null;
+  }
 }
 
 function prettyBody(text) {
@@ -681,6 +795,13 @@ function addHeaderRow(key, value) {
   $("set-headers").append(row);
 }
 
+function showExperiment(exp, btn) {
+  for (const b of $("experiments").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === btn));
+  const goal = $("experiment-goal");
+  goal.hidden = !exp;
+  goal.textContent = exp ? exp.goal : "";
+}
+
 function applyPreset(preset) {
   $("req-method").value = preset.method;
   $("req-path").value = preset.path;
@@ -731,8 +852,19 @@ function bind() {
   }
   for (const preset of PRESETS) {
     const btn = el("button", { type: "button", class: "preset", text: preset.name });
-    btn.addEventListener("click", () => applyPreset(preset));
+    btn.addEventListener("click", () => {
+      applyPreset(preset);
+      showExperiment(null);
+    });
     $("presets").append(btn);
+  }
+  for (const exp of EXPERIMENTS) {
+    const btn = el("button", { type: "button", class: "preset", "aria-pressed": "false", text: exp.name });
+    btn.addEventListener("click", () => {
+      applyPreset(PRESETS[exp.preset]);
+      showExperiment(exp, btn);
+    });
+    $("experiments").append(btn);
   }
 }
 
