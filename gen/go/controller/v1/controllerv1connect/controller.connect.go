@@ -41,6 +41,9 @@ const (
 	// DemoControllerServiceSubmitDecisionProcedure is the fully-qualified name of the
 	// DemoControllerService's SubmitDecision RPC.
 	DemoControllerServiceSubmitDecisionProcedure = "/controller.v1.DemoControllerService/SubmitDecision"
+	// DemoControllerServiceCancelSessionProcedure is the fully-qualified name of the
+	// DemoControllerService's CancelSession RPC.
+	DemoControllerServiceCancelSessionProcedure = "/controller.v1.DemoControllerService/CancelSession"
 	// DemoProcessorServiceProcessProcedure is the fully-qualified name of the DemoProcessorService's
 	// Process RPC.
 	DemoProcessorServiceProcessProcedure = "/controller.v1.DemoProcessorService/Process"
@@ -48,13 +51,16 @@ const (
 
 // DemoControllerServiceClient is a client for the controller.v1.DemoControllerService service.
 type DemoControllerServiceClient interface {
-	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-	// then sends the envoy-bound request carrying that session id and receives
-	// phase updates as the session resolves.
+	// CreateSession creates a new session (or resumes an existing one when
+	// session_id is set and still active) and opens a stream of updates. The
+	// first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+	// currently paused phase/snapshot/deadline when resuming mid-flight).
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.ServerStreamForClient[v1.CreateSessionResponse], error)
 	// SubmitDecision submits a human decision (continue/cancel) for a session at a phase.
 	SubmitDecision(context.Context, *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error)
+	// CancelSession explicitly terminates an active session, failing closed any
+	// in-flight phase and releasing session state.
+	CancelSession(context.Context, *connect.Request[v1.CancelSessionRequest]) (*connect.Response[v1.CancelSessionResponse], error)
 }
 
 // NewDemoControllerServiceClient constructs a client for the controller.v1.DemoControllerService
@@ -80,6 +86,12 @@ func NewDemoControllerServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(demoControllerServiceMethods.ByName("SubmitDecision")),
 			connect.WithClientOptions(opts...),
 		),
+		cancelSession: connect.NewClient[v1.CancelSessionRequest, v1.CancelSessionResponse](
+			httpClient,
+			baseURL+DemoControllerServiceCancelSessionProcedure,
+			connect.WithSchema(demoControllerServiceMethods.ByName("CancelSession")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -87,6 +99,7 @@ func NewDemoControllerServiceClient(httpClient connect.HTTPClient, baseURL strin
 type demoControllerServiceClient struct {
 	createSession  *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
 	submitDecision *connect.Client[v1.SubmitDecisionRequest, v1.SubmitDecisionResponse]
+	cancelSession  *connect.Client[v1.CancelSessionRequest, v1.CancelSessionResponse]
 }
 
 // CreateSession calls controller.v1.DemoControllerService.CreateSession.
@@ -99,16 +112,24 @@ func (c *demoControllerServiceClient) SubmitDecision(ctx context.Context, req *c
 	return c.submitDecision.CallUnary(ctx, req)
 }
 
+// CancelSession calls controller.v1.DemoControllerService.CancelSession.
+func (c *demoControllerServiceClient) CancelSession(ctx context.Context, req *connect.Request[v1.CancelSessionRequest]) (*connect.Response[v1.CancelSessionResponse], error) {
+	return c.cancelSession.CallUnary(ctx, req)
+}
+
 // DemoControllerServiceHandler is an implementation of the controller.v1.DemoControllerService
 // service.
 type DemoControllerServiceHandler interface {
-	// CreateSession creates a new session and opens a stream of updates. The
-	// first Update carries the session id with phase PHASE_UNSPECIFIED; the browser
-	// then sends the envoy-bound request carrying that session id and receives
-	// phase updates as the session resolves.
+	// CreateSession creates a new session (or resumes an existing one when
+	// session_id is set and still active) and opens a stream of updates. The
+	// first Update carries the session id with phase PHASE_UNSPECIFIED (or the
+	// currently paused phase/snapshot/deadline when resuming mid-flight).
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest], *connect.ServerStream[v1.CreateSessionResponse]) error
 	// SubmitDecision submits a human decision (continue/cancel) for a session at a phase.
 	SubmitDecision(context.Context, *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error)
+	// CancelSession explicitly terminates an active session, failing closed any
+	// in-flight phase and releasing session state.
+	CancelSession(context.Context, *connect.Request[v1.CancelSessionRequest]) (*connect.Response[v1.CancelSessionResponse], error)
 }
 
 // NewDemoControllerServiceHandler builds an HTTP handler from the service implementation. It
@@ -130,12 +151,20 @@ func NewDemoControllerServiceHandler(svc DemoControllerServiceHandler, opts ...c
 		connect.WithSchema(demoControllerServiceMethods.ByName("SubmitDecision")),
 		connect.WithHandlerOptions(opts...),
 	)
+	demoControllerServiceCancelSessionHandler := connect.NewUnaryHandler(
+		DemoControllerServiceCancelSessionProcedure,
+		svc.CancelSession,
+		connect.WithSchema(demoControllerServiceMethods.ByName("CancelSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/controller.v1.DemoControllerService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case DemoControllerServiceCreateSessionProcedure:
 			demoControllerServiceCreateSessionHandler.ServeHTTP(w, r)
 		case DemoControllerServiceSubmitDecisionProcedure:
 			demoControllerServiceSubmitDecisionHandler.ServeHTTP(w, r)
+		case DemoControllerServiceCancelSessionProcedure:
+			demoControllerServiceCancelSessionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -151,6 +180,10 @@ func (UnimplementedDemoControllerServiceHandler) CreateSession(context.Context, 
 
 func (UnimplementedDemoControllerServiceHandler) SubmitDecision(context.Context, *connect.Request[v1.SubmitDecisionRequest]) (*connect.Response[v1.SubmitDecisionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("controller.v1.DemoControllerService.SubmitDecision is not implemented"))
+}
+
+func (UnimplementedDemoControllerServiceHandler) CancelSession(context.Context, *connect.Request[v1.CancelSessionRequest]) (*connect.Response[v1.CancelSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("controller.v1.DemoControllerService.CancelSession is not implemented"))
 }
 
 // DemoProcessorServiceClient is a client for the controller.v1.DemoProcessorService service.
