@@ -483,10 +483,28 @@ function renderSession() {
   const dot = $("session-dot");
   const label = $("session-label");
   dot.dataset.state = state.sessionState;
-  if (state.sessionState === "live") label.textContent = "session " + shortId(state.sessionId);
+  const live = state.sessionState === "live";
+  label.disabled = !live;
+  label.title = live ? "Copy session ID " + state.sessionId : "";
+  if (live) label.textContent = "session " + shortId(state.sessionId);
   else if (state.sessionState === "connecting") label.textContent = "Connecting…";
   else if (state.sessionState === "ended") label.textContent = "Session ended";
   else label.textContent = "Couldn't connect";
+}
+
+let copyResetTimer = null;
+
+async function copySessionId() {
+  if (!state.sessionId) return;
+  const label = $("session-label");
+  try {
+    await navigator.clipboard.writeText(state.sessionId);
+    label.textContent = "copied";
+  } catch (err) {
+    label.textContent = "couldn't copy";
+  }
+  clearTimeout(copyResetTimer);
+  copyResetTimer = setTimeout(renderSession, 1200);
 }
 
 function shortId(id) {
@@ -843,6 +861,7 @@ async function selectLang(lang) {
 
 function bind() {
   $("new-session").addEventListener("click", startSession);
+  $("session-label").addEventListener("click", copySessionId);
   $("send-request").addEventListener("click", sendRequest);
   $("btn-continue").addEventListener("click", () => decide("continue"));
   $("btn-cancel").addEventListener("click", () => decide("cancel"));

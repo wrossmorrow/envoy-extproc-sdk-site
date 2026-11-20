@@ -296,3 +296,11 @@ button.preset[aria-pressed="true"] { border-color: var(--accent); color: var(--a
 }
 .explain { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--text-2); }
 .explain[data-kind="bad"] { color: var(--text); border-left: 3px solid var(--bad); padding-left: 0.6rem; }
+
+/* Session ID: click to copy */
+button.session-id {
+  font: inherit; font-weight: 400; color: inherit; background: none;
+  border: 0; padding: 0.1rem 0.25rem; border-radius: 4px; cursor: pointer;
+}
+button.session-id:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); }
+button.session-id:disabled { opacity: 1; cursor: default; }
