@@ -284,6 +284,9 @@ pre {
 
 footer { display: flex; gap: 1rem; padding-bottom: 2rem; font-size: 0.8rem; }
 footer a { color: var(--text-2); }
+footer { flex-wrap: wrap; align-items: center; }
+footer .footer-repo { margin-left: auto; display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; }
+footer .footer-repo:hover { color: var(--accent); }
 
 /* Guided experiments and response explanations */
 .experiments { margin: -0.25rem 0 0.85rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border); }
