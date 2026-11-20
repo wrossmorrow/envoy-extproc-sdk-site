@@ -383,6 +383,13 @@ func (c *SessionController) ResolveDecision(ctx context.Context, sessionID strin
 		demoControllerPhasesPending.Dec()
 		return decisionResponse(s, phase, res.decision), nil
 	case <-ctx.Done():
+		c.mu.Lock()
+		if s.Status == SessionStatusInFlight {
+			s.Status = SessionStatusResolved
+			s.Pending = nil
+			s.LastSnapshot = nil
+		}
+		c.mu.Unlock()
 		demoControllerPhasesPending.Dec()
 		return nil, ctx.Err()
 	case <-time.After(time.Until(s.PhaseDeadline)):

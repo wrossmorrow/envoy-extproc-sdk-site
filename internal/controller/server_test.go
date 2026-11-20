@@ -576,3 +576,27 @@ func TestSessionController_CancelSession_UnblocksInFlightAndDropsSession(t *test
 		t.Fatalf("second CancelSession() error = %v, want %v", err, errSessionNotFound)
 	}
 }
+
+func TestSessionController_ResolveDecision_ClearsInFlightOnContextCancel(t *testing.T) {
+	c := NewSessionController()
+	s, err := c.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want nil", err)
+	}
+	defer c.removeSession(s.ID)
+
+	if err = c.BeginPhase(s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); err != nil {
+		t.Fatalf("BeginPhase() error = %v, want nil", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, decErr := c.ResolveDecision(ctx, s.ID, int32(v1.Phase_PHASE_REQUEST_HEADERS)); decErr == nil {
+		t.Fatalf("ResolveDecision() error = nil, want context.Canceled")
+	}
+
+	inFlight, inErr := c.SessionInFlight(s.ID)
+	if inErr != nil || inFlight {
+		t.Fatalf("SessionInFlight() after context cancel = (%v, %v), want (false, nil)", inFlight, inErr)
+	}
+}
