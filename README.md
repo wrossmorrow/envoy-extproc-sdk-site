@@ -2,7 +2,7 @@
 
 Interactive demo site for Envoy External Processing (`ext_proc`) SDKs across **Go**, **Rust**, and **Java**. Send HTTP requests through Envoy, pause at each `ext_proc` phase, inspect or mutate headers and bodies in the browser, and choose whether to **Continue** or **Cancel** (short-circuit with an immediate response).
 
-Try it at https://envoy-extproc-sdk.com/ (or [.org](https://envoy-extproc-sdk.org/), [.dev](https://envoy-extproc-sdk.dev/), [.app](https://envoy-extproc-sdk.app/))
+Try it at https://envoy-extproc-sdk.app/ (or [.com](https://envoy-extproc-sdk.com/), [.org](https://envoy-extproc-sdk.org/), [.dev](https://envoy-extproc-sdk.dev/))
 
 ![alt text](image.png)
 
