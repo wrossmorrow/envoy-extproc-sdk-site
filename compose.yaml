@@ -58,9 +58,9 @@ services:
       args:
         CMD: web
     ports:
-      - "9091:9091"
+      - "9097:9097"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -q -O /dev/null http://localhost:9091/ || exit 1"]
+      test: ["CMD-SHELL", "wget --no-check-certificate -q -O /dev/null http://localhost:9097/ || exit 1"]
       interval: 2s
       timeout: 2s
       retries: 15
