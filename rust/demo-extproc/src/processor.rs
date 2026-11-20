@@ -1,5 +1,6 @@
 //! Interactive demo extproc processor.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -248,11 +249,12 @@ impl DemoRequestProcessor {
                     session_id,
                     e
                 );
-                Error::from(e.clone())
+                Error::from(e)
             });
             let decision = match maybe {
                 Ok(Some(resp)) => resp.decision,
-                _ => None,
+                Ok(None) => None,
+                Err(e) => return Err(e),
             };
             eprintln!(
                 "[demo-extproc] phase={} session_id={} decision={}",
@@ -392,11 +394,37 @@ impl DemoRequestProcessor {
         body: Option<&[u8]>,
     ) -> Result<(), Error> {
         let session_id = self.session_id_for(ctx, headers);
+        if session_id.is_empty() {
+            self.retire_stream(ctx);
+            let cancel_headers = build_header_values_from_map(&HashMap::from([(
+                "content-type".to_string(),
+                "text/plain".to_string(),
+            )]));
+            ctx.cancel_request(400, &cancel_headers, b"missing x-demo-session-id header")?;
+            return Ok(());
+        }
         let snapshot = self.snapshot(ctx, headers, body);
         log_phase_sent(phase, &session_id, &snapshot);
-        let decision = self
+        let decision = match self
             .send_phase_and_decide(ctx, phase, session_id, snapshot)
-            .await?;
+            .await
+        {
+            Ok(decision) => decision,
+            Err(err) => {
+                if let Some(status) = err.downcast_ref::<tonic::Status>() {
+                    if status.code() == tonic::Code::NotFound {
+                        self.retire_stream(ctx);
+                        let cancel_headers = build_header_values_from_map(&HashMap::from([(
+                            "content-type".to_string(),
+                            "text/plain".to_string(),
+                        )]));
+                        ctx.cancel_request(404, &cancel_headers, b"session not found")?;
+                        return Ok(());
+                    }
+                }
+                return Err(err);
+            }
+        };
         let Some(decision) = decision else {
             // The controller closed the phase stream without a decision; complete
             // the phase without one and keep the exchange flowing by continuing.
@@ -700,6 +728,29 @@ mod tests {
         let mut ctx = RequestContext::new();
         let headers = all_headers(&[("x-demo-session-id", "sess-2")]);
         assert_eq!(processor.session_id_for(&mut ctx, &headers), "sess-2");
+    }
+
+    #[tokio::test]
+    async fn test_missing_session_id_returns_immediate_400_without_controller() {
+        let processor = DemoRequestProcessor::new("127.0.0.1:1");
+        let mut ctx = RequestContext::new();
+        ctx.reset_phase().unwrap();
+        let headers = all_headers(&[(":method", "GET"), (":path", "/")]);
+        processor
+            .resolve_phase(&mut ctx, RequestPhase::RequestHeaders, &headers, None)
+            .await
+            .expect("missing session id should produce an immediate 400, not an error");
+        let resp = ctx
+            .get_response(RequestPhase::RequestHeaders)
+            .unwrap()
+            .unwrap();
+        match resp.response {
+            Some(envoy_types::pb::envoy::service::ext_proc::v3::processing_response::Response::ImmediateResponse(imm)) => {
+                assert_eq!(imm.status.unwrap().code, 400);
+                assert_eq!(imm.body, b"missing x-demo-session-id header");
+            }
+            other => panic!("expected ImmediateResponse 400, got {:?}", other),
+        }
     }
 }
 

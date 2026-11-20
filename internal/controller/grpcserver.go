@@ -2,10 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	v1 "github.com/wrossmorrow/envoy-extproc-sdk-site/gen/go/controller/v1"
 	grpc "google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -91,6 +94,9 @@ func (s *DemoProcessorGRPCServer) Process(stream grpc.BidiStreamingServer[v1.Pro
 			return nil
 		}
 		if err = s.Controller.BeginPhase(update.SessionId, int32(phase)); err != nil {
+			if errors.Is(err, errSessionNotFound) {
+				return status.Error(codes.NotFound, err.Error())
+			}
 			return err
 		}
 		if err = s.Controller.SendUpdate(update.SessionId, &v1.CreateSessionResponse{

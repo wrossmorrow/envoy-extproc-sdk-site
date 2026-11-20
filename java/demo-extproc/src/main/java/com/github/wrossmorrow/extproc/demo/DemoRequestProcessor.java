@@ -23,6 +23,7 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.ClientCalls;
 import io.grpc.stub.StreamObserver;
 import java.nio.charset.StandardCharsets;
@@ -264,6 +265,12 @@ public class DemoRequestProcessor implements RequestProcessor {
   protected void resolvePhase(
       RequestContext ctx, RequestCase phase, Map<String, String> headers, String body) {
     String sessionID = sessionIdFor(ctx, headers);
+    if (sessionID.isEmpty()) {
+      retireStream(ctx);
+      ctx.cancelRequest(
+          400, Map.of("content-type", "text/plain"), "missing x-demo-session-id header");
+      return;
+    }
     if (headers != null) {
       List<String> names = new ArrayList<>();
       for (String key : headers.keySet()) {
@@ -273,7 +280,17 @@ public class DemoRequestProcessor implements RequestProcessor {
       ctx.setValue(SNAPSHOT_NAMES_KEY, names);
     }
     HttpSnapshot snapshot = buildSnapshot(ctx, phase, headers, body);
-    ProcessResponse decision = sendPhaseAndDecide(ctx, phase, sessionID, snapshot);
+    ProcessResponse decision;
+    try {
+      decision = sendPhaseAndDecide(ctx, phase, sessionID, snapshot);
+    } catch (StatusRuntimeException e) {
+      if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
+        retireStream(ctx);
+        ctx.cancelRequest(404, Map.of("content-type", "text/plain"), "session not found");
+        return;
+      }
+      throw e;
+    }
     boolean endOfStream = ctx.streamComplete() != null && ctx.streamComplete();
     boolean responsePhase = isResponsePhase(phase);
     Decision action = decision != null ? decision.getDecision() : null;
@@ -380,11 +397,11 @@ public class DemoRequestProcessor implements RequestProcessor {
         throw timeout;
       }
       if (next instanceof RuntimeException e) {
-        abortStream(ctx, "controller phase exchange failed", e);
+        clearControllerStreamState(ctx);
         throw e;
       }
       if (next instanceof Throwable t) {
-        abortStream(ctx, "controller phase exchange failed", t);
+        clearControllerStreamState(ctx);
         throw new RuntimeException("controller phase exchange failed", t);
       }
       return (ProcessResponse) next;

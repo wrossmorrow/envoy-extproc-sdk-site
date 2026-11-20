@@ -239,6 +239,9 @@ func isResponsePhase(phase int32) bool {
 // the decision (continue/cancel).
 func (s *RequestProcessor) sendPhaseAndDecide(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) (*v1.ProcessResponse, error) {
 	sessionID := s.sessionIDFor(rc, headers)
+	if sessionID == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing x-demo-session-id header")
+	}
 	snap := s.snapshot(rc, headers, body)
 	return s.sendPhase(ctx, phase, rc, sessionID, snap)
 }
@@ -327,6 +330,14 @@ func (s *RequestProcessor) snapshot(rc *extproc.RequestContext, headers extproc.
 func (s *RequestProcessor) resolvePhase(ctx context.Context, phase int32, rc *extproc.RequestContext, headers extproc.AllHeaders, body []byte) error {
 	dec, err := s.sendPhaseAndDecide(ctx, phase, rc, headers, body)
 	if err != nil {
+		switch status.Code(err) {
+		case codes.InvalidArgument:
+			s.retireStream(rc)
+			return rc.CancelRequest(400, extproc.BuildHeaderValuesFromMap(map[string]string{"content-type": "text/plain"}), "missing x-demo-session-id header")
+		case codes.NotFound:
+			s.retireStream(rc)
+			return rc.CancelRequest(404, extproc.BuildHeaderValuesFromMap(map[string]string{"content-type": "text/plain"}), "session not found")
+		}
 		return err
 	}
 	decision := dec.GetDecision()
