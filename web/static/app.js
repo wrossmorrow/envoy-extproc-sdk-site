@@ -103,6 +103,7 @@ const state = {
   sessionId: null,
   sessionState: "connecting", // connecting | live | ended | error
   sessionAbort: null,
+  requestAbort: null,
   reconnectTimer: null,
   reconnectAttempt: 0,
   requestInFlight: false,
@@ -245,12 +246,18 @@ async function startSession({ resume = false } = {}) {
 
   if (!resume) {
     const previousId = state.sessionId;
+    if (state.requestAbort) {
+      state.requestAbort.abort();
+      state.requestAbort = null;
+    }
     state.sessionId = null;
     state.reconnectAttempt = 0;
     state.requestInFlight = false;
     // The response can also beat the last decision's SubmitDecision reply.
     if (state.pendingFinalize) state.pendingFinalize.finalize();
     clearPause();
+    resetSteps();
+    $("response").hidden = true;
     if (previousId) cancelSession(previousId);
   }
   setSession("connecting");
@@ -507,13 +514,32 @@ async function sendRequest() {
   renderComposer();
   log("Sent " + method + " " + path + " via the " + LANG_NAMES[state.lang] + " processor.");
 
+  const reqAbort = new AbortController();
+  state.requestAbort = reqAbort;
   const started = performance.now();
   let result;
   try {
-    const res = await fetch(ENVOY_BASE.replace(/\/+$/, "") + path, { method, headers, body });
+    const res = await fetch(ENVOY_BASE.replace(/\/+$/, "") + path, {
+      method,
+      headers,
+      body,
+      signal: reqAbort.signal,
+    });
     result = { status: res.status, headers: res.headers, body: await res.text() };
   } catch (err) {
+    if (reqAbort.signal.aborted) {
+      if (state.requestAbort === reqAbort) state.requestAbort = null;
+      state.requestInFlight = false;
+      renderComposer();
+      return;
+    }
     result = { status: 0, headers: new Headers(), body: String(err) };
+  }
+  if (state.requestAbort === reqAbort) state.requestAbort = null;
+  if (reqAbort.signal.aborted) {
+    state.requestInFlight = false;
+    renderComposer();
+    return;
   }
   const elapsed = Math.round(performance.now() - started);
 
@@ -890,12 +916,6 @@ function applyPreset(preset) {
 
 async function selectLang(lang) {
   const switching = lang !== state.lang;
-  if (switching && state.requestInFlight && state.phase && !state.deciding) {
-    // Abandon the in-flight exchange for the old backend by sending an automatic
-    // cancel decision for the current phase, then start a fresh session on the
-    // new backend.
-    await decide("cancel");
-  }
   state.lang = lang;
   for (const tab of document.querySelectorAll(".tabs [role=tab]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.lang === lang));
