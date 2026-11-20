@@ -5,6 +5,8 @@ on:
       - 'java/**'
       - 'gen/java/**'
       - 'Dockerfile.java'
+      - '.github/workflows/java-pr.yaml'
+  workflow_dispatch:
 
 jobs:
   java-check:

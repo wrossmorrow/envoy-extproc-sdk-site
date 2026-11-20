@@ -6,6 +6,8 @@ on:
       - 'compose.yaml'
       - 'compose.prod.yaml'
       - 'infra/terraform/**'
+      - '.github/workflows/infra-pr.yaml'
+  workflow_dispatch:
 
 jobs:
   validate-envoy-and-compose:

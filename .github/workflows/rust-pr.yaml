@@ -5,6 +5,8 @@ on:
       - 'rust/**'
       - 'gen/rust/**'
       - 'Dockerfile.rust'
+      - '.github/workflows/rust-pr.yaml'
+  workflow_dispatch:
 
 jobs:
   rust-check:
