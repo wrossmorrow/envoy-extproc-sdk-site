@@ -8,7 +8,7 @@ plugins {
 // consumed from the GitHub Packages registry (see the maven-github-packages repository
 // below) and from the local Maven repository published via `just java-sdk-install`, because
 // it is not published to Maven Central.
-def sdkVersion = '0.3.1-alpha2'
+def sdkVersion = '0.3.1-alpha1'
 
 java {
   sourceCompatibility = JavaVersion.VERSION_21
