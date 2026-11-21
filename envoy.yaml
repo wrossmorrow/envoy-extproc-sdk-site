@@ -120,6 +120,8 @@ static_resources:
                               - name: x-demo-target-lang
                                 string_match:
                                   exact: go
+                              - name: x-demo-session-id
+                                present_match: true
                           route:
                             cluster: upstream
                           typed_per_filter_config:
@@ -149,6 +151,8 @@ static_resources:
                               - name: x-demo-target-lang
                                 string_match:
                                   exact: rust
+                              - name: x-demo-session-id
+                                present_match: true
                           route:
                             cluster: upstream
                           typed_per_filter_config:
@@ -178,6 +182,8 @@ static_resources:
                               - name: x-demo-target-lang
                                 string_match:
                                   exact: java
+                              - name: x-demo-session-id
+                                present_match: true
                           route:
                             cluster: upstream
                           typed_per_filter_config:
@@ -198,10 +204,29 @@ static_resources:
                         
                         # Default demo target: no x-demo-target-lang header (or any
                         # language without a more specific route) -> golang extproc.
-                        - match:
+                        - name: extproc-default
+                          match:
                             prefix: "/"
+                            headers:
+                              - name: x-demo-session-id
+                                present_match: true
                           route:
                             cluster: upstream
+
+                        # Catch-all for unmatched requests (e.g., internet scanners probing
+                        # /.env, /wp-config.php, etc. without x-demo-session-id) so they
+                        # never hit ext_proc, controller, or upstream.
+                        - name: not-found
+                          match:
+                            prefix: "/"
+                          direct_response:
+                            status: 404
+                            body:
+                              inline_string: "not found\n"
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_proc:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+                              disabled: true
                     
                 http_filters:
                   - name: envoy.filters.http.local_ratelimit
