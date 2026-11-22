@@ -19,7 +19,7 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}/envoy.yaml:/etc/envoy/envoy.yaml:ro" \
-            envoyproxy/envoy:v1.35-latest \
+            envoyproxy/envoy:v1.40-latest \
             envoy --mode validate -c /etc/envoy/envoy.yaml
       - name: Validate compose configs
         env:

@@ -436,6 +436,8 @@ class DemoProcessorExchangeTest {
     assertFalse(response.getRequestHeaders().getResponse().getBodyMutation().hasBody());
     assertEquals(0, response.getRequestHeaders().getResponse().getBodyMutation().getBody().size());
     exchange.completeClient();
+    assertTrue(exchange.awaitCompleted(5));
+    controllerStreamErrors.poll(1, TimeUnit.SECONDS);
   }
 
   @Test
@@ -470,6 +472,8 @@ class DemoProcessorExchangeTest {
             "content-length",
             String.valueOf("rewritten-body".length())));
     exchange.completeClient();
+    assertTrue(exchange.awaitCompleted(5));
+    controllerStreamErrors.poll(1, TimeUnit.SECONDS);
   }
 
   @Test
@@ -498,6 +502,8 @@ class DemoProcessorExchangeTest {
         hasHeaderValue(
             response.getRequestHeaders().getResponse().getHeaderMutation(), "content-length", "0"));
     exchange.completeClient();
+    assertTrue(exchange.awaitCompleted(5));
+    controllerStreamErrors.poll(1, TimeUnit.SECONDS);
   }
 
   @Test
@@ -525,7 +531,7 @@ class DemoProcessorExchangeTest {
     assertEquals(ProcessingResponse.ResponseCase.IMMEDIATE_RESPONSE, response.getResponseCase());
     ImmediateResponse immediate = response.getImmediateResponse();
     assertEquals(503, immediate.getStatus().getCode().getNumber());
-    assertEquals("upstream unavailable", immediate.getBody());
+    assertEquals("upstream unavailable", immediate.getBody().toStringUtf8());
     assertTrue(hasHeaderValue(immediate.getHeaders(), "x-cancel-reason", "maintenance"));
     assertFalse(hasHeaderKey(immediate.getHeaders(), ":status"));
 
@@ -615,7 +621,9 @@ class DemoProcessorExchangeTest {
 
     assertEquals(ProcessingResponse.ResponseCase.IMMEDIATE_RESPONSE, response.getResponseCase());
     assertEquals(400, response.getImmediateResponse().getStatus().getCode().getNumber());
-    assertEquals("missing x-demo-session-id header", response.getImmediateResponse().getBody());
+    assertEquals(
+        "missing x-demo-session-id header",
+        response.getImmediateResponse().getBody().toStringUtf8());
     assertTrue(exchange.awaitCompleted(5));
     assertEquals(
         beforeStreams,
@@ -642,7 +650,7 @@ class DemoProcessorExchangeTest {
 
     assertEquals(ProcessingResponse.ResponseCase.IMMEDIATE_RESPONSE, response.getResponseCase());
     assertEquals(404, response.getImmediateResponse().getStatus().getCode().getNumber());
-    assertEquals("session not found", response.getImmediateResponse().getBody());
+    assertEquals("session not found", response.getImmediateResponse().getBody().toStringUtf8());
     assertTrue(exchange.awaitCompleted(5));
   }
 
