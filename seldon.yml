@@ -1,0 +1,74 @@
+version: 1
+name: envoy-extproc-sdk-site
+run:
+  url: https://envoy-extproc-sdk.app/
+  # No username/password yet: the site is a public unauthenticated demo. The
+  # interactive cases need a live ext_proc session, which the QA agent gets by
+  # simply loading the page and clicking Send request.
+
+testCases:
+  - name: Landing page renders the demo surface
+    id: landing-renders
+    steps:
+      - go to /
+    criteria: the page renders the "Envoy ext_proc, live" heading, the Go/Rust/Java processor tabs, a request composer with a Send request button, and an Intercept panel showing nothing paused yet
+
+  - name: How-it-works page renders
+    id: how-page-renders
+    steps:
+      - go to /how.html
+    criteria: the How this demo works page renders its explanation of the ext_proc pipeline
+
+  - name: Language tabs switch the selected processor
+    id: lang-tab-switch
+    steps:
+      - go to /
+      - click the Rust tab
+    criteria: the Rust tab is selected (Go is no longer selected) and no "isn't deployed yet" notice appears
+
+  - name: Send a request and continue through the pauses
+    id: send-and-continue
+    steps:
+      - go to /
+      - click Send request
+      - at each pause that appears, click Continue until the exchange completes
+    criteria: a Response panel appears showing an echoed status badge and response body, and the event log records the sent request
+
+  - name: Header removed at request headers reaches the upstream
+    id: header-removal-visible
+    steps:
+      - go to /
+      - click the "Strip a header" guided experiment
+      - click Send request
+      - at the request-headers pause, mark a header for removal and Continue
+      - at each later pause, click Continue until the exchange completes
+    criteria: the echoed response shows the removed header is absent, while the other headers the browser sent are still present
+
+  - name: Rewriting the request body changes what upstream receives
+    id: body-rewrite-visible
+    steps:
+      - go to /
+      - click the "Rewrite the body" guided experiment
+      - click Send request
+      - at the request-body pause, edit the body (e.g. change qty to 100)
+      - at each pause, click Continue until the exchange completes
+    criteria: the echoed response body reflects the edited values, not the values the browser originally sent
+
+  - name: Rejecting at request headers short-circuits before upstream
+    id: reject-at-request-headers
+    steps:
+      - go to /
+      - click the "Block before upstream" guided experiment
+      - click Send request
+      - at the request-headers pause, choose the Reject with option and pick a 403 status
+    criteria: the response shows the rejection status (403) and does not contain a real upstream echo of the request
+
+  - name: Rejecting at response headers still leaves the upstream behind
+    id: reject-at-response-headers
+    steps:
+      - go to /
+      - click the "Too late to stop it" guided experiment
+      - click Send request
+      - continue through the request phases until the response-headers pause
+      - at that pause, choose the Reject with option
+    criteria: the response shows the rejection status instead of the upstream's normal response
