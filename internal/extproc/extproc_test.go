@@ -230,3 +230,88 @@ func TestDemoProcessorRejectsMissingAndUnknownSessions(t *testing.T) {
 		t.Fatalf("unknown session response = %+v, want immediate 404", resp2)
 	}
 }
+
+func TestDemoProcessorClearsResponseBody(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ctrl := controller.NewSessionController()
+	grpcServer := grpc.NewServer()
+	v1.RegisterDemoControllerServiceServer(grpcServer, &controller.DemoControllerGRPCServer{Controller: ctrl})
+	v1.RegisterDemoProcessorServiceServer(grpcServer, &controller.DemoProcessorGRPCServer{Controller: ctrl})
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen controller: %v", err)
+	}
+	go grpcServer.Serve(lis)
+	ctrlAddr := lis.Addr().String()
+	defer grpcServer.Stop()
+
+	sess, err := ctrl.CreateSession()
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessID := sess.ID
+
+	proc := NewRequestProcessor(ctrlAddr)
+	sopts := &extproc.ServerOptions{ExtProcPort: 50057, MetricsHTTPPort: 9103, TerminationGracePeriodSeconds: 10}
+	go func() { extproc.Serve(sopts, proc, slog.Default()) }()
+	time.Sleep(700 * time.Millisecond)
+
+	extprocConn, err := grpc.NewClient("127.0.0.1:50057", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("connect extproc: %v", err)
+	}
+	defer extprocConn.Close()
+	extprocClient, err := epb.NewExternalProcessorClient(extprocConn).Process(ctx)
+	if err != nil {
+		t.Fatalf("open extproc process stream: %v", err)
+	}
+
+	// 1. REQUEST_HEADERS
+	if err = extprocClient.Send(&epb.ProcessingRequest{
+		Request: &epb.ProcessingRequest_RequestHeaders{
+			RequestHeaders: &epb.HttpHeaders{
+				Headers:     &corev3.HeaderMap{Headers: []*corev3.HeaderValue{{Key: "x-demo-session-id", Value: sessID}}},
+				EndOfStream: true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("send request headers: %v", err)
+	}
+	for ctrl.SubmitDecision(ctx, sessID, int32(v1.Phase_PHASE_REQUEST_HEADERS), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{}}}) != nil {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err = extprocClient.Recv(); err != nil {
+		t.Fatalf("recv request headers response: %v", err)
+	}
+
+	// 2. RESPONSE_BODY with empty Continue.Body -> ClearBody + content-length: 0
+	if err = extprocClient.Send(&epb.ProcessingRequest{
+		Request: &epb.ProcessingRequest_ResponseBody{
+			ResponseBody: &epb.HttpBody{Body: []byte("hello world"), EndOfStream: true},
+		},
+	}); err != nil {
+		t.Fatalf("send response body: %v", err)
+	}
+	for ctrl.SubmitDecision(ctx, sessID, int32(v1.Phase_PHASE_RESPONSE_BODY), &v1.Decision{Action: &v1.Decision_Continue{Continue: &v1.Continue{Body: []byte{}}}}) != nil {
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, err := extprocClient.Recv()
+	if err != nil {
+		t.Fatalf("recv response body response: %v", err)
+	}
+	common := resp.GetResponseBody().GetResponse()
+	if !common.GetBodyMutation().GetClearBody() {
+		t.Fatalf("expected clear_body=true, got %+v", common.GetBodyMutation())
+	}
+	var gotCL string
+	for _, h := range common.GetHeaderMutation().GetSetHeaders() {
+		if h.GetHeader().GetKey() == "content-length" {
+			gotCL = string(h.GetHeader().GetRawValue())
+		}
+	}
+	if gotCL != "0" {
+		t.Fatalf("expected content-length=0, got %q", gotCL)
+	}
+}

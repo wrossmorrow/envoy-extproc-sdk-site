@@ -197,9 +197,11 @@ class DemoRequestProcessorTest {
     ProcessingResponse response = ctx.getResponse(RequestCase.REQUEST_BODY);
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_BODY, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getRequestBody().getResponse().getStatus());
-    assertFalse(
-        response.getRequestBody().getResponse().hasHeaderMutation(),
-        "body phases must not carry HeaderMutations");
+    var headerMutation = response.getRequestBody().getResponse().getHeaderMutation();
+    assertEquals(1, headerMutation.getSetHeadersCount());
+    assertEquals("content-length", headerMutation.getSetHeaders(0).getHeader().getKey());
+    assertEquals("14", headerMutation.getSetHeaders(0).getHeader().getRawValue().toStringUtf8());
+    assertEquals(0, headerMutation.getRemoveHeadersCount());
     assertTrue(response.getRequestBody().getResponse().hasBodyMutation());
     assertArrayEquals(
         "rewritten-body".getBytes(StandardCharsets.UTF_8),
@@ -215,7 +217,10 @@ class DemoRequestProcessorTest {
     ProcessingResponse response = ctx.getResponse(RequestCase.RESPONSE_BODY);
     assertEquals(ProcessingResponse.ResponseCase.RESPONSE_BODY, response.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, response.getResponseBody().getResponse().getStatus());
-    assertFalse(response.getResponseBody().getResponse().hasHeaderMutation());
+    var headerMutation = response.getResponseBody().getResponse().getHeaderMutation();
+    assertEquals(1, headerMutation.getSetHeadersCount());
+    assertEquals("content-length", headerMutation.getSetHeaders(0).getHeader().getKey());
+    assertEquals("0", headerMutation.getSetHeaders(0).getHeader().getRawValue().toStringUtf8());
     assertTrue(response.getResponseBody().getResponse().hasBodyMutation());
     assertTrue(response.getResponseBody().getResponse().getBodyMutation().getClearBody());
     assertFalse(response.getResponseBody().getResponse().getBodyMutation().hasBody());

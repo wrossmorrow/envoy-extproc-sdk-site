@@ -13,7 +13,9 @@ use envoy_extproc_sdk::{is_stream_cancelled, Error, ProcessingOptions, RequestPr
 
 use crate::controller::v1::decision::Action;
 use crate::controller::v1::demo_processor_service_client::DemoProcessorServiceClient;
-use crate::controller::v1::{Decision, Header, HttpSnapshot, ProcessRequest, ProcessResponse};
+use crate::controller::v1::{
+    Continue, Decision, Header, HttpSnapshot, ProcessRequest, ProcessResponse,
+};
 
 const SESSION_ID_HEADER: &str = "x-demo-session-id";
 const PROCESSED_HEADER: &str = "x-demo-processed";
@@ -434,24 +436,7 @@ impl DemoRequestProcessor {
         if let Some(action) = decision.action {
             match action {
                 Action::Continue(continue_decision) => {
-                    if !continue_decision.remove_headers.is_empty() {
-                        ctx.remove_headers(&continue_decision.remove_headers)?;
-                    }
-                    if let Some(body) = &continue_decision.body {
-                        ctx.replace_body(body)?;
-                    }
-                    let header_values = build_header_values_from_map(&continue_decision.headers);
-                    for (name, value) in header_values {
-                        ctx.overwrite_header(&name, &value)?;
-                    }
-                    ctx.add_header(
-                        PROCESSED_HEADER,
-                        &HeaderValue {
-                            value: "true".to_string(),
-                            raw_value: Some(b"true".to_vec()),
-                        },
-                    )?;
-                    ctx.continue_request()?;
+                    Self::apply_continue_decision(ctx, &continue_decision)?;
                 }
                 Action::Cancel(cancel) => {
                     // A cancel ends the exchange, so retire the controller phase
@@ -469,6 +454,35 @@ impl DemoRequestProcessor {
             // continuing without applying any mutations.
             ctx.continue_request()?;
         }
+        Ok(())
+    }
+
+    fn apply_continue_decision(
+        ctx: &mut RequestContext,
+        continue_decision: &Continue,
+    ) -> Result<(), Error> {
+        if !continue_decision.remove_headers.is_empty() {
+            ctx.remove_headers(&continue_decision.remove_headers)?;
+        }
+        if let Some(body) = &continue_decision.body {
+            if body.is_empty() {
+                ctx.clear_body()?;
+            } else {
+                ctx.replace_body(body)?;
+            }
+        }
+        let header_values = build_header_values_from_map(&continue_decision.headers);
+        for (name, value) in header_values {
+            ctx.overwrite_header(&name, &value)?;
+        }
+        ctx.add_header(
+            PROCESSED_HEADER,
+            &HeaderValue {
+                value: "true".to_string(),
+                raw_value: Some(b"true".to_vec()),
+            },
+        )?;
+        ctx.continue_request()?;
         Ok(())
     }
 }
@@ -751,6 +765,41 @@ mod tests {
             }
             other => panic!("expected ImmediateResponse 400, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_empty_continue_body_clears_body_and_sets_zero_content_length() {
+        let mut ctx = RequestContext::new();
+        ctx.reset_phase().unwrap();
+        let continue_decision = Continue {
+            body: Some(Vec::new()),
+            ..Default::default()
+        };
+        DemoRequestProcessor::apply_continue_decision(&mut ctx, &continue_decision)
+            .expect("apply_continue_decision should succeed");
+        let resp = ctx
+            .get_response(RequestPhase::ResponseBody)
+            .unwrap()
+            .unwrap();
+        let common = match resp.response {
+            Some(envoy_types::pb::envoy::service::ext_proc::v3::processing_response::Response::ResponseBody(body_resp)) => {
+                body_resp.response.unwrap()
+            }
+            other => panic!("expected ResponseBody, got {:?}", other),
+        };
+        assert_eq!(
+            common.body_mutation.unwrap().mutation,
+            Some(
+                envoy_types::pb::envoy::service::ext_proc::v3::body_mutation::Mutation::ClearBody(
+                    true
+                )
+            )
+        );
+        let set_headers = common.header_mutation.unwrap().set_headers;
+        assert!(set_headers.iter().any(|h| {
+            let hdr = h.header.as_ref().unwrap();
+            hdr.key == "content-length" && hdr.raw_value == b"0"
+        }));
     }
 }
 
