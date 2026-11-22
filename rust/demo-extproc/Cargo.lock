@@ -189,9 +189,9 @@ dependencies = [
 
 [[package]]
 name = "envoy_extproc_sdk"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86daa463a418faf2fae54bfadebae276d9e9bc0c5f9652fd36c3b4381e40cc23"
+checksum = "5e4a9a5c34412d9bac2b57dff85eaf311822d4bc20352ec4bf84e4bd3936cb3d"
 dependencies = [
  "async-trait",
  "axum",

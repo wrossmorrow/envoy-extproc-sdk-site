@@ -4,11 +4,11 @@ plugins {
   id 'com.diffplug.spotless' version '6.20.0'
 }
 
-// The demo extproc is built on envoy-extproc-sdk-java. The 0.3.1-alpha2 release is
-// consumed from the GitHub Packages registry (see the maven-github-packages repository
-// below) and from the local Maven repository published via `just java-sdk-install`, because
+// The demo extproc is built on envoy-extproc-sdk-java. Releases are consumed from
+// the GitHub Packages registry (see the maven-github-packages repository below)
+// and from the local Maven repository published via `just java-sdk-install`, because
 // it is not published to Maven Central.
-def sdkVersion = '0.3.1-alpha1'
+def sdkVersion = '0.5.0'
 
 java {
   sourceCompatibility = JavaVersion.VERSION_21
