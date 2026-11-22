@@ -317,7 +317,9 @@ class DemoProcessorExchangeTest {
     ProcessingResponse r2 = exchange.awaitResponse(5);
     assertEquals(ProcessingResponse.ResponseCase.REQUEST_BODY, r2.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, r2.getRequestBody().getResponse().getStatus());
-    assertFalse(r2.getRequestBody().getResponse().hasHeaderMutation());
+    assertTrue(
+        hasHeaderValue(
+            r2.getRequestBody().getResponse().getHeaderMutation(), "content-length", "10"));
     assertArrayEquals(
         "{\"qty\":99}".getBytes(StandardCharsets.UTF_8),
         r2.getRequestBody().getResponse().getBodyMutation().getBody().toByteArray());
@@ -346,7 +348,9 @@ class DemoProcessorExchangeTest {
     ProcessingResponse r4 = exchange.awaitResponse(5);
     assertEquals(ProcessingResponse.ResponseCase.RESPONSE_BODY, r4.getResponseCase());
     assertEquals(ResponseStatus.CONTINUE, r4.getResponseBody().getResponse().getStatus());
-    assertFalse(r4.getResponseBody().getResponse().hasHeaderMutation());
+    assertTrue(
+        hasHeaderValue(
+            r4.getResponseBody().getResponse().getHeaderMutation(), "content-length", "17"));
     assertArrayEquals(
         "{\"accepted\":true}".getBytes(StandardCharsets.UTF_8),
         r4.getResponseBody().getResponse().getBodyMutation().getBody().toByteArray());
@@ -651,6 +655,50 @@ class DemoProcessorExchangeTest {
     assertEquals(ProcessingResponse.ResponseCase.IMMEDIATE_RESPONSE, response.getResponseCase());
     assertEquals(404, response.getImmediateResponse().getStatus().getCode().getNumber());
     assertEquals("session not found", response.getImmediateResponse().getBody().toStringUtf8());
+    assertTrue(exchange.awaitCompleted(5));
+  }
+
+  @Test
+  void demoClearsResponseBodyAndSetsZeroContentLength() throws Exception {
+    decisionProvider =
+        req -> {
+          if (req.getPhase() == Phase.PHASE_RESPONSE_BODY) {
+            return Decision.newBuilder()
+                .setContinue(Continue.newBuilder().setBody(ByteString.EMPTY).build())
+                .build();
+          }
+          return Decision.newBuilder().setContinue(Continue.newBuilder().build()).build();
+        };
+
+    TestExchangeStream exchange = openExchange();
+    Map<String, String> reqHeaders = new HashMap<>();
+    reqHeaders.put("x-demo-session-id", "sess-clear-resp-body");
+    reqHeaders.put(":method", "GET");
+    reqHeaders.put(":path", "/echo");
+    exchange.send(
+        envoyHeadersRequest(ProcessingRequest.RequestCase.REQUEST_HEADERS, reqHeaders, true));
+    assertEquals(
+        ProcessingResponse.ResponseCase.REQUEST_HEADERS,
+        exchange.awaitResponse(5).getResponseCase());
+
+    Map<String, String> respHeaders = new HashMap<>();
+    respHeaders.put(":status", "200");
+    respHeaders.put("content-length", "11");
+    exchange.send(
+        envoyHeadersRequest(ProcessingRequest.RequestCase.RESPONSE_HEADERS, respHeaders, false));
+    assertEquals(
+        ProcessingResponse.ResponseCase.RESPONSE_HEADERS,
+        exchange.awaitResponse(5).getResponseCase());
+
+    exchange.send(
+        envoyBodyRequest(ProcessingRequest.RequestCase.RESPONSE_BODY, "hello world", true));
+    ProcessingResponse r = exchange.awaitResponse(5);
+    assertEquals(ProcessingResponse.ResponseCase.RESPONSE_BODY, r.getResponseCase());
+    assertEquals(ResponseStatus.CONTINUE, r.getResponseBody().getResponse().getStatus());
+    assertTrue(r.getResponseBody().getResponse().getBodyMutation().getClearBody());
+    assertTrue(
+        hasHeaderValue(
+            r.getResponseBody().getResponse().getHeaderMutation(), "content-length", "0"));
     assertTrue(exchange.awaitCompleted(5));
   }
 

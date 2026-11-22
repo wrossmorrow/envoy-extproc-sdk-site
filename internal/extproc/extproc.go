@@ -351,8 +351,12 @@ func (s *RequestProcessor) resolvePhase(ctx context.Context, phase int32, rc *ex
 				return err
 			}
 		}
-		if len(continueDecision.GetBody()) > 0 {
-			if err := rc.ReplaceBody(continueDecision.GetBody()); err != nil {
+		if continueDecision.Body != nil {
+			if len(continueDecision.Body) == 0 {
+				if err := rc.ClearBody(); err != nil {
+					return err
+				}
+			} else if err := rc.ReplaceBody(continueDecision.Body); err != nil {
 				return err
 			}
 		}

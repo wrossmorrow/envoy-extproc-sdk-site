@@ -463,12 +463,10 @@ public class DemoRequestProcessor implements RequestProcessor {
         ctx.replaceBody(bodyBytes);
         ctx.continueAndReplace();
       } else if (isBodyPhase(phase)) {
-        // For body phases the mutation rides on a plain CONTINUE without HeaderMutations.
-        if (bodyBytes.length == 0) {
-          ctx.clearBodyChunk();
-        } else {
-          ctx.replaceBodyChunk(bodyBytes);
-        }
+        // Envoy runs in BUFFERED mode, so body-phase mutations ride on a plain CONTINUE without
+        // user header mutations, while still updating content-length (via replaceBody / clearBody)
+        // so Envoy does not fail closed on a body/content-length mismatch.
+        ctx.replaceBody(bodyBytes);
       }
       // Trailers phases ignore stray body mutations.
     }
